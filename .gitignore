@@ -1,0 +1,85 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+
+# Packages / build
+build/
+dist/
+.eggs/
+*.egg-info/
+pip-wheel-metadata/
+
+# Virtual environments
+venv/
+.env
+.venv/
+env/
+ENV/
+
+# Tooling
+.pytest_cache/
+.coverage
+.coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Data / caches
+data/
+datasets/
+cache/
+wandb/
+mlruns/
+outputs/
+runs/
+
+# Model artifacts
+models/
+checkpoints/
+*.ckpt
+*.pt
+*.bin
+*.safetensors
+
+# HuggingFace cache
+huggingface/
+hf_cache/
+.cache/huggingface/
+
+# Pruning project outputs
+pruning_reports/
+pruning_tmp/
+prune_stats/
+pruned_models/
+
+# Temp
+tmp/
+temp/
+
+# Config / local
+.python-version
+
+# Large structured data
+*.jsonl
+*.parquet

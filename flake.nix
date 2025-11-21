@@ -42,12 +42,12 @@
                   scikit-learn
                   scipy
                   matplotlib
+                  llmcompressor
                 ]))
           ];
           diskSize = 1024 * 3; # necessary to fit the packages, otherwise the build fails
         };
       in {
-        packages.default = panna-python;
         packages.container = container;
         devShells.default = (pkgs.mkShell.override {stdenv = pkgs.clangStdenv;}) {
           venvDir = ".venv";
@@ -70,6 +70,7 @@
                   h5py
                   nanobind
                   icecream
+                  llmcompressor
                   scikit-build-core
                 ])
             )
