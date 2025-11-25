@@ -77,6 +77,6 @@ def get_dataset(name, split=None):
 
 if __name__ == "__main__":
     # Example usage
-    for ds_name in ['c4', 'gsm8k', 'winogrande']:
+    for ds_name in ['gsm8k', 'winogrande']:
         dataset = get_dataset(ds_name, split='train')
         print(f"Loaded {ds_name} with {len(dataset)} examples.")
