@@ -11,5 +11,8 @@ requires-python = ">=3.12"
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+where = ["source"]
+
 [project.urls]
 "Homepage" = "https://github.com/FrancescoMonaco/prun"
