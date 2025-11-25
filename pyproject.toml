@@ -1,0 +1,15 @@
+[project]
+name = "prun"
+version = "0.1.0"
+description = "A project for running pruning experiments"
+authors = [
+    { name = "Francesco Pio Monaco", email = "francescopio.monaco@unitn.it" }
+]
+requires-python = ">=3.12"
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.urls]
+"Homepage" = "https://github.com/FrancescoMonaco/prun"

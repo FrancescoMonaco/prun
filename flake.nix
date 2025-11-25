@@ -42,7 +42,10 @@
                   scikit-learn
                   scipy
                   matplotlib
+                  seaborn
                   llmcompressor
+                  transformers
+                  vllm
                 ]))
           ];
           diskSize = 1024 * 3; # necessary to fit the packages, otherwise the build fails
@@ -71,6 +74,8 @@
                   nanobind
                   icecream
                   llmcompressor
+                  transformers
+                  vllm
                   scikit-build-core
                 ])
             )
