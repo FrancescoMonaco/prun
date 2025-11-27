@@ -3,6 +3,7 @@ Part of the code is adapted from: https://github.com/muraronicola/Muraro-Nicola-
 """
 import torch
 import torch.nn.functional as F
+#import wandb
 from transformers import AutoModel, AutoTokenizer
 from data import get_dataset
 
@@ -258,9 +259,9 @@ if __name__ == "__main__":
     # Let's uso winogrande as test
     dataset = get_dataset('winogrande', split='train')
     print(f"Loaded dataset with {len(dataset)} samples.")
-    # Now let's use a small model Qwen/Qwen1.5-1.8B
+    # Now let's use a small model Qwen/Qwen3-1.7B there is also 0.6B, 4B and 8nB
     from transformers import AutoModelForCausalLM, AutoTokenizer
-    model_name = "Qwen/Qwen1.5-1.8B"
+    model_name = "Qwen/Qwen3-1.7B"
     model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     
@@ -274,11 +275,11 @@ if __name__ == "__main__":
     print("Preprocessing dataset...")
     processed_dataset = []
     # Limit to a small number for testing
-    subset_size = 10**4
+    subset_size = 2**9
     for i in range(min(len(dataset), subset_size)):
         item = dataset[i]
         text = item.get('sentence', item.get('text', '')) # Handle winogrande or others
-        encoded = tokenizer(text, return_tensors='pt', padding='max_length', truncation=True, max_length=128)
+        encoded = tokenizer(text, return_tensors='pt', padding='max_length', truncation=True, max_length=256)
         processed_dataset.append((encoded['input_ids'],))
     
     dataset = processed_dataset
@@ -297,10 +298,17 @@ if __name__ == "__main__":
     print(f"Calibration data selected with {len(calibration_data)} samples.")
     
     # Compare between pairs to see if cosine similarity is high
+    threshold = 0.90
     for i in range(calibration_data.__len__()):
         for j in range(i + 1, calibration_data.__len__()):
             cos_sim = cosine_similarity_matrix[i, j].item()
-            print(f"Cosine similarity between sample {i} and sample {j}: {cos_sim}")
+            if cos_sim > threshold:
+                print(f"Cosine similarity between sample {i} and sample {j}: {cos_sim}")
+                # Print the sentences
+                text_i = tokenizer.decode(calibration_data[i][0][0], skip_special_tokens=True)
+                text_j = tokenizer.decode(calibration_data[j][0][0], skip_special_tokens=True)
+                print(f"Sample {i}: {text_i}")
+                print(f"Sample {j}: {text_j}")
     # Mean over the upper triangle
     upper_triangle_indices = torch.triu_indices(calibration_data.__len__(), calibration_data.__len__(), offset=1)
     mean_cosine_similarity = cosine_similarity_matrix[upper_triangle_indices[0], upper_triangle_indices[1]].mean().item()
