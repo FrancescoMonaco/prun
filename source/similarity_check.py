@@ -6,6 +6,10 @@ import torch.nn.functional as F
 #import wandb
 from transformers import AutoModel, AutoTokenizer
 from data import get_dataset
+import nltk
+# import matplotlib.pyplot as plt
+# import matplotlib
+import numpy as np
 
 def embedd_data(dataset, model, device="cuda:0"):
     model.eval()
@@ -256,9 +260,11 @@ def prepare_calibration(model, dataloader, nsamples=128, type='concat', distance
     return calibration_data   
 
 if __name__ == "__main__":
-    # Let's uso winogrande as test
-    dataset = get_dataset('winogrande', split='train')
+#    matplotlib.use('WebAgg')  # Use a non-interactive backend
+    # For example use winogrande, mawps
+    dataset = get_dataset('mawps', split='train')
     print(f"Loaded dataset with {len(dataset)} samples.")
+    
     # Now let's use a small model Qwen/Qwen3-1.7B there is also 0.6B, 4B and 8nB
     from transformers import AutoModelForCausalLM, AutoTokenizer
     model_name = "Qwen/Qwen3-1.7B"
@@ -279,6 +285,9 @@ if __name__ == "__main__":
     for i in range(min(len(dataset), subset_size)):
         item = dataset[i]
         text = item.get('sentence', item.get('text', '')) # Handle winogrande or others
+        # If no sentence use 'question' or 'prompt' or 'code'
+        if text == '':
+            text = item.get('question', item.get('prompt', item.get('code', '')))   
         encoded = tokenizer(text, return_tensors='pt', padding='max_length', truncation=True, max_length=256)
         processed_dataset.append((encoded['input_ids'],))
     
@@ -309,6 +318,30 @@ if __name__ == "__main__":
                 text_j = tokenizer.decode(calibration_data[j][0][0], skip_special_tokens=True)
                 print(f"Sample {i}: {text_i}")
                 print(f"Sample {j}: {text_j}")
+    # Measure the n-gram overlap among the calibration samples using nltk
+    n = 3  # Trigram
+    ngram_overlap_matrix = np.zeros((calibration_data.__len__(), calibration_data.__len__()))
+    ngram_overlap_counts = []
+    for i in range(calibration_data.__len__()):
+        text_i = tokenizer.decode(calibration_data[i][0][0], skip_special_tokens=True)
+        ngrams_i = set(nltk.ngrams(text_i.split(), n))
+        for j in range(i + 1, calibration_data.__len__()):
+            text_j = tokenizer.decode(calibration_data[j][0][0], skip_special_tokens=True)
+            ngrams_j = set(nltk.ngrams(text_j.split(), n))
+            overlap = ngrams_i.intersection(ngrams_j)
+            ngram_overlap_counts.append(len(overlap))
+            ngram_overlap_matrix[i, j] = len(overlap)
+            ngram_overlap_matrix[j, i] = len(overlap)
+            print(f"N-gram overlap (n={n}) between sample {i} and sample {j}: {len(overlap)}")
+            print(f"Sample {i} n-grams: {ngrams_i}")
+            print(f"Sample {j} n-grams: {ngrams_j}")
+    # Plot histogram of n-gram overlaps
+    # plt.figure(figsize=(10, 6))
+    # plt.heatmap(ngram_overlap_matrix, annot=True, fmt="d", cmap="YlGnBu")
+    # plt.xlabel('Sample Index')
+    # plt.ylabel('Sample Index')
+    # plt.title(f'N-gram (n={n}) Overlap Counts among Calibration Samples')
+    # plt.show()
     # Mean over the upper triangle
     upper_triangle_indices = torch.triu_indices(calibration_data.__len__(), calibration_data.__len__(), offset=1)
     mean_cosine_similarity = cosine_similarity_matrix[upper_triangle_indices[0], upper_triangle_indices[1]].mean().item()

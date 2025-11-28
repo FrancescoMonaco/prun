@@ -28,7 +28,7 @@ DATASET_MAPPING = {
     'pile': ('monology/pile-uncopyrighted', None),
     'gsm8k': ('gsm8k', 'main'),
     'svamp': ('ChilleD/SVAMP', None),
-    'mawps': ('azuresky/mawps', None),
+    'mawps': ('MU-NLPC/Calc-mawps', None),
     'anli_r1': ('facebook/anli', None),
     'esnli': ('esnli', None),
     'rte': ('super_glue', 'rte'),
