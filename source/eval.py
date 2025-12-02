@@ -2,8 +2,9 @@ import torch
 from torch.utils.data import DataLoader
 import logging
 
-FORMAT = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-logging.basicConfig(level=logging.INFO, format=FORMAT)
+FORMAT = "time=%(asctime)s level=%(levelname)s name=%(name)s msg=%(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+logging.basicConfig(level=logging.INFO, format=FORMAT, datefmt=DATE_FORMAT)
 log = logging.getLogger(__name__)
 
 

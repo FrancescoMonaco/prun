@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=similarity_check
-#SBATCH --output=logs/similarity_check_%j.out
-#SBATCH --error=logs/similarity_check_%j.err
+#SBATCH --job-name=prune
+#SBATCH --output=logs/prune_%j.out
+#SBATCH --error=logs/prune_%j.err
+#SBATCH -N 1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:1
-#SBATCH --time=02:00:00
-#SBATCH --partition=
+#SBATCH --partition=medium
 
-srun conda activate prun && python source/similarity_check.py
+srun conda activate prun && python source/prune.py

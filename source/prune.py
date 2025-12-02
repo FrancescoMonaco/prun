@@ -1,3 +1,4 @@
+import transformers
 from similarity_check import (
     use_embedding_for_sampling,
 )
@@ -9,16 +10,149 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPa
 from data import get_dataset
 from datasets import Dataset
 
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 # import matplotlib
 from llmcompressor.modifiers.pruning import WandaPruningModifier
 from llmcompressor import oneshot
 import logging
 from prettytable import PrettyTable
+from pydantic import PrivateAttr
+from typing import Dict, List
+import numpy as np
 
-FORMAT = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-logging.basicConfig(level=logging.INFO, format=FORMAT)
+FORMAT = "time=%(asctime)s level=%(levelname)s name=%(name)s msg=%(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+logging.basicConfig(level=logging.INFO, format=FORMAT, datefmt=DATE_FORMAT)
 log = logging.getLogger(__name__)
+
+
+def get_input_norms(inp, module):
+    # Logic adapted from wanda_sparsify.py to extract column norms per sample
+    # inp shape: (batch, seq_len, hidden) or similar
+    
+    if len(inp.shape) == 2:
+        inp = inp.unsqueeze(0)
+    
+    # Handle batch dimension by iterating
+    batch_norms = []
+    
+    batch_size = inp.shape[0]
+    for i in range(batch_size):
+        sample_inp = inp[i] # (seq_len, hidden)
+        
+        if isinstance(module, (torch.nn.Linear, transformers.Conv1D)):
+            # Linear: (seq, hidden) -> (hidden, seq)
+            # We want norm over seq dimension (dim=1 after transpose)
+            # resulting in (hidden,) vector
+            if len(sample_inp.shape) == 2:
+                sample_inp = sample_inp.t()
+            elif len(sample_inp.shape) == 1:
+                 sample_inp = sample_inp.unsqueeze(1)
+
+        # For Conv2d, logic is more complex, but Qwen uses Linear.
+        # Assuming Linear for now as per Qwen architecture.
+        
+        sample_inp = sample_inp.float()
+        # Norm over the sequence length (dim=1)
+        norms = torch.norm(sample_inp, p=2, dim=1)
+        batch_norms.append(norms.cpu())
+        
+    return batch_norms
+
+
+class AnalysisWandaModifier(WandaPruningModifier):
+    _layer_norms: Dict[str, List[torch.Tensor]] = PrivateAttr(default_factory=dict)
+
+    def calibrate_module(self, module, args, _output):
+        super().calibrate_module(module, args, _output)
+        
+        inp = args[0]
+        norms_list = get_input_norms(inp, module)
+        
+        # Use module name as key if possible, or module object
+        # self._module_names maps module -> name
+        if module in self._module_names:
+            name = self._module_names[module]
+        else:
+            name = str(module)
+            
+        if name not in self._layer_norms:
+            self._layer_norms[name] = []
+        
+        self._layer_norms[name].extend(norms_list)
+
+    def plot_stats(self, model, save_path="wanda_analysis.png"):
+        log.info(f"Generating analysis plots to {save_path}...")
+        
+        # Filter layers that have stats
+        layers = sorted(self._layer_norms.keys())
+        if not layers:
+            log.warning("No stats collected to plot.")
+            return
+
+        num_layers = len(layers)
+        # 2 plots per layer (Mean, Std)
+        cols = 4
+        rows = (num_layers * 2 + cols - 1) // cols
+        
+        fig, axes = plt.subplots(rows, cols, figsize=(20, 5 * rows), layout='constrained')
+        axes = axes.flatten()
+        
+        for i, layer_name in enumerate(layers):
+            norms_list = self._layer_norms[layer_name]
+            # Stack norms: (num_samples, hidden_dim)
+            norms_stack = torch.stack(norms_list)
+            
+            # Compute Mean and Std of norms across samples
+            mean_norms = torch.mean(norms_stack, dim=0)
+            std_norms = torch.std(norms_stack, dim=0)
+            
+            # Get the weight matrix
+            # We need to find the module in the model
+            module = None
+            for name, mod in model.named_modules():
+                if name == layer_name:
+                    module = mod
+                    break
+            
+            if module is None:
+                continue
+                
+            W = module.weight.data.cpu().float()
+            if isinstance(module, transformers.Conv1D):
+                W = W.t()
+            
+            W_abs = torch.abs(W)
+            
+            # Compute Mean and Std of W_metric
+            # W_metric = |W| * norms
+            # Mean = |W| * Mean(norms)
+            # Std = |W| * Std(norms)
+            
+            # Broadcast multiply: (out, in) * (in,)
+            mean_W_metric = W_abs * mean_norms.unsqueeze(0)
+            std_W_metric = W_abs * std_norms.unsqueeze(0)
+            
+            # Plot Mean
+            ax_mean = axes[i * 2]
+            im_mean = ax_mean.imshow(mean_W_metric.numpy(), aspect='auto', cmap='viridis')
+            ax_mean.set_title(f"{layer_name} Mean W_metric")
+            fig.colorbar(im_mean, ax=ax_mean)
+            
+            # Plot Std
+            ax_std = axes[i * 2 + 1]
+            im_std = ax_std.imshow(std_W_metric.numpy(), aspect='auto', cmap='magma')
+            ax_std.set_title(f"{layer_name} Std W_metric")
+            fig.colorbar(im_std, ax=ax_std)
+            
+        # Hide unused subplots
+        for j in range(num_layers * 2, len(axes)):
+            axes[j].axis('off')
+            
+        plt.savefig(save_path, format='pdf', dpi=400)
+        plt.close()
+        log.info("Analysis plots saved.")
 
 
 # --- MODIFIED: get_tokenized_data ---
@@ -154,7 +288,8 @@ if __name__ == "__main__":
     calibration_dataset = Dataset.from_list(data_list)
 
     # Define Wanda recipe
-    recipe = WandaPruningModifier(sparsity=0.5, mask_structure="0:0", targets="__ALL__")
+    # recipe = WandaPruningModifier(sparsity=0.5, mask_structure="0:0", targets="__ALL__")
+    recipe = AnalysisWandaModifier(sparsity=0.5, mask_structure="0:0", targets="__ALL__")
 
     log.info("Starting Wanda pruning...")
     oneshot(
@@ -164,6 +299,10 @@ if __name__ == "__main__":
         # max_seq_length=128,
         # num_calibration_samples=len(calibration_data)
     )
+    
+    # Generate plots
+    recipe.plot_stats(model, save_path="wanda_analysis.png")
+    
     log.info("Pruning finished.")
 
     # Evaluate the pruned model
