@@ -1,9 +1,11 @@
 import torch
 from torch.utils.data import DataLoader
 import logging
+
 FORMAT = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 log = logging.getLogger(__name__)
+
 
 def evaluate_model(model, dataloader: DataLoader, device, max_length=128):
     model.to(device)
@@ -16,14 +18,19 @@ def evaluate_model(model, dataloader: DataLoader, device, max_length=128):
         for batch in dataloader:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=input_ids)
+
+            outputs = model(
+                input_ids=input_ids, attention_mask=attention_mask, labels=input_ids
+            )
             loss = outputs.loss
             num_tokens = attention_mask.sum().item()
             total_loss += loss.item() * num_tokens
             total_tokens += num_tokens
-        
+
     avg_loss = total_loss / total_tokens
     perplexity = torch.exp(torch.tensor(avg_loss))
-    log.info("Model evaluation completed.", extra={"avg_loss": avg_loss, "perplexity": perplexity.item()})
+    log.info(
+        "Model evaluation completed.",
+        extra={"avg_loss": avg_loss, "perplexity": perplexity.item()},
+    )
     return avg_loss.item(), perplexity.item()
