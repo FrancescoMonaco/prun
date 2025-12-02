@@ -5,7 +5,6 @@ from eval import evaluate_model
 import torch
 from torch.utils.data import DataLoader
 
-# The DataCollatorWithPadding must be correctly imported
 from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding
 from data import get_dataset
 from datasets import Dataset
@@ -15,6 +14,7 @@ from datasets import Dataset
 from llmcompressor.modifiers.pruning import WandaPruningModifier
 from llmcompressor import oneshot
 import logging
+from prettytable import PrettyTable
 
 FORMAT = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
@@ -44,7 +44,9 @@ def get_tokenized_data(dataset, tokenizer, max_length=128, return_tensors=False)
         # NOTE: We return the raw dict if we don't need tensors yet (for DataCollator)
         if return_tensors:
             # For similarity check, we might still need tensors in the loop
-            encoded = tokenizer.pad(encoded, return_tensors="pt", max_length=max_length)
+            encoded = tokenizer.pad(
+                encoded, padding="max_length", return_tensors="pt", max_length=max_length
+            )
             processed_dataset.append(
                 {
                     "input_ids": encoded["input_ids"].squeeze(0),
@@ -64,7 +66,7 @@ def get_tokenized_data(dataset, tokenizer, max_length=128, return_tensors=False)
 
 
 if __name__ == "__main__":
-    # ... (model loading and initialization remains the same)
+    # Load model and tokenizer
     model_name = "Qwen/Qwen3-1.7B"
     model = AutoModelForCausalLM.from_pretrained(
         model_name, dtype=torch.float16, device_map="auto", trust_remote_code=True
@@ -78,6 +80,24 @@ if __name__ == "__main__":
     dataset_name = "winogrande"
     dataset = get_dataset(dataset_name, split="train")
     log.info(f"Loaded dataset {dataset_name} with {len(dataset)} samples.")
+    
+    # Evaluate the unpruned model first
+    eval_dataset = get_dataset(dataset_name, split="test")
+    tokenized_eval_data = get_tokenized_data(
+        eval_dataset, tokenizer, max_length=2048, return_tensors=False
+    )
+    eval_hf_dataset = Dataset.from_list(tokenized_eval_data)
+    data_collator = DataCollatorWithPadding(
+        tokenizer=tokenizer, padding="max_length", max_length=2048
+    )
+    dataloader = DataLoader(
+        eval_hf_dataset,
+        batch_size=16,
+        collate_fn=data_collator,
+        shuffle=False,
+    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    avg_loss_original, perplexity_original = evaluate_model(model, dataloader, device, max_length=2048)
 
     # Preprocess dataset for similarity check
     subset_size = 2000
@@ -105,7 +125,7 @@ if __name__ == "__main__":
     log.info(f"Calibration data prepared: {len(calibration_data_dicts)} samples.")
 
     # Convert calibration data to format expected by oneshot
-    # Assuming calibration_data_dicts returns dicts like {'input_ids': tensor(1, 128), 'attention_mask': tensor(1, 128)}
+    # Assuming calibration_data_dicts returns dicts like {'input_ids': tensor(seq_len), ...}
     # We need to extract the Python list/array of IDs from the tensor for Dataset.from_list
     data_list = []
     for item in calibration_data_dicts:
@@ -113,11 +133,17 @@ if __name__ == "__main__":
         input_ids = item["input_ids"]
         attention_mask = item.get("attention_mask")
 
-        # Convert tensor (1, seq_len) to list of integers
+        # Convert tensor to list of integers
         if isinstance(input_ids, torch.Tensor):
-            input_ids = input_ids.squeeze(0).cpu().numpy().tolist()
+            # Ensure it's on CPU and convert to list
+            if input_ids.dim() == 2 and input_ids.shape[0] == 1:
+                input_ids = input_ids.squeeze(0)
+            input_ids = input_ids.cpu().numpy().tolist()
+
             if attention_mask is not None and isinstance(attention_mask, torch.Tensor):
-                attention_mask = attention_mask.squeeze(0).cpu().numpy().tolist()
+                if attention_mask.dim() == 2 and attention_mask.shape[0] == 1:
+                    attention_mask = attention_mask.squeeze(0)
+                attention_mask = attention_mask.cpu().numpy().tolist()
 
         data_dict = {"input_ids": input_ids}
         if attention_mask is not None:
@@ -147,7 +173,7 @@ if __name__ == "__main__":
     # Prepare the tokenized dataset for the DataLoader
     # NOTE: We pass return_tensors=False so the data collator handles the tensor conversion
     tokenized_eval_data = get_tokenized_data(
-        eval_dataset, tokenizer, return_tensors=False
+        eval_dataset, tokenizer, max_length=2048, return_tensors=False
     )
 
     # Convert list of dicts to Hugging Face Dataset object for better integration
@@ -155,12 +181,12 @@ if __name__ == "__main__":
 
     # Initialize the Data Collator
     data_collator = DataCollatorWithPadding(
-        tokenizer=tokenizer, padding="max_length", max_length=128
+        tokenizer=tokenizer, padding="max_length", max_length=2048
     )
 
     dataloader = DataLoader(
         eval_hf_dataset,
-        batch_size=8,
+        batch_size=16,
         shuffle=False,
         collate_fn=data_collator,  # <-- FIX for TypeError
     )
@@ -169,8 +195,13 @@ if __name__ == "__main__":
     log.info(f"Using device: {device}")
 
     # Evaluate the model
-    avg_loss, perplexity = evaluate_model(model, dataloader, device, max_length=128)
-    log.info(f"Evaluation completed. Avg Loss: {avg_loss}, Perplexity: {perplexity}")
-
+    avg_loss, perplexity = evaluate_model(model, dataloader, device, max_length=2048)
+    log.info(f"Pruned model evaluation completed.")
+    # Summarize results in a table
+    table = PrettyTable()
+    table.field_names = ["Model", "Avg Loss", "Perplexity", "Pruning", "Calibration"]
+    table.add_row([model_name, f"{avg_loss_original:.4f}", f"{perplexity_original:.2f}", "Original", "N/A"])
+    table.add_row([model_name, f"{avg_loss:.4f}", f"{perplexity:.2f}", "Wanda 0.5", "top 128 cosine"])
+    print(table)
     # Send wandb info online
     # wandb.finish()

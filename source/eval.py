@@ -19,8 +19,11 @@ def evaluate_model(model, dataloader: DataLoader, device, max_length=128):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
 
+            labels = input_ids.clone()
+            labels[attention_mask == 0] = -100
+
             outputs = model(
-                input_ids=input_ids, attention_mask=attention_mask, labels=input_ids
+                input_ids=input_ids, attention_mask=attention_mask, labels=labels
             )
             loss = outputs.loss
             num_tokens = attention_mask.sum().item()
@@ -29,8 +32,4 @@ def evaluate_model(model, dataloader: DataLoader, device, max_length=128):
 
     avg_loss = total_loss / total_tokens
     perplexity = torch.exp(torch.tensor(avg_loss))
-    log.info(
-        "Model evaluation completed.",
-        extra={"avg_loss": avg_loss, "perplexity": perplexity.item()},
-    )
-    return avg_loss.item(), perplexity.item()
+    return avg_loss, perplexity.item()

@@ -15,37 +15,56 @@ import nltk
 import numpy as np
 
 
-def embedd_data(dataset, model, device="cuda:0"):
+def embedd_data(dataset, model, device="cuda:0", batch_size=32):
     model.eval()
 
     embedding_layer = model.get_input_embeddings()
     # embedding_layer.to(device) # It should already be on device if model is
 
+    # Define a collate function to handle different input types
+    def collate_fn(batch):
+        # batch is a list of items from dataset
+        input_ids_list = []
+        for item in batch:
+            if isinstance(item, dict):
+                t = item["input_ids"]
+            elif isinstance(item, (list, tuple)):
+                t = item[0]
+            else:
+                t = item
+
+            if not isinstance(t, torch.Tensor):
+                t = torch.tensor(t)
+
+            # Ensure shape is (Seq_Len,)
+            if t.dim() == 2 and t.shape[0] == 1:
+                t = t.squeeze(0)
+            input_ids_list.append(t)
+
+        return torch.stack(input_ids_list)
+
+    data_loader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False
+    )
+
+    all_embeddings = []
+
     with torch.no_grad():
         print("Embedding data...", flush=True)
 
-        data_batch = []
-        for i in range(len(dataset)):
-            # print("sample", i)
-            data_batch.append(dataset[i]["input_ids"])  # CHANGED to handle dicts
+        for batch_input_ids in data_loader:
+            batch_input_ids = batch_input_ids.to(device)
+            embedding = embedding_layer(batch_input_ids)
+            all_embeddings.append(embedding.cpu())
 
-        # data_batch = [dataset[i][0].to(device) for i in range(len(dataset))]
-
-        # Create a single tensor:
-        data_batch = torch.cat(data_batch, dim=0)
-        # print("To device...", flush=True)
-        data_batch = data_batch.to(device)
-
-        # print("Data batch shape = {}".format(data_batch.shape), flush=True)
-
-        embedding = embedding_layer(data_batch)
-        embedding = embedding.to("cpu")
-
-        print("Embedding done, shape = {}".format(embedding.shape), flush=True)
-
-    # embedding_layer.to("cpu") # Don't move it back if it's part of the model
-
-    return embedding
+        if all_embeddings:
+            final_embeddings = torch.cat(all_embeddings, dim=0)
+            print(
+                "Embedding done, shape = {}".format(final_embeddings.shape), flush=True
+            )
+            return final_embeddings
+        else:
+            return torch.tensor([])
 
 
 def cosine_similarity_vectorized(data):
