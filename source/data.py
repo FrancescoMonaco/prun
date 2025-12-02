@@ -90,5 +90,5 @@ def get_dataset(name, split=None):
 if __name__ == "__main__":
     # Example usage
     for ds_name in ["gsm8k", "winogrande"]:
-        dataset = get_dataset(ds_name, split="train")
+        dataset = get_dataset(ds_name, split="test")
         print(f"Loaded {ds_name} with {len(dataset)} examples.")

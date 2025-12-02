@@ -27,7 +27,7 @@ def embedd_data(dataset, model, device="cuda:0"):
         data_batch = []
         for i in range(len(dataset)):
             # print("sample", i)
-            data_batch.append(dataset[i][0])
+            data_batch.append(dataset[i]["input_ids"]) # CHANGED to handle dicts
 
         # data_batch = [dataset[i][0].to(device) for i in range(len(dataset))]
 
