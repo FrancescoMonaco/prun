@@ -83,3 +83,8 @@ temp/
 # Large structured data
 *.jsonl
 *.parquet
+
+# Results plots
+*.pdf
+*.txt
+*.csv

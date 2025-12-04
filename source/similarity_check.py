@@ -138,7 +138,7 @@ def use_embedding_for_sampling(
                 filename.format(model_name, dataset_name[indice], distance),
             )
 
-        if type == "prototype":
+        if type == "prototype" or type == "decoupled":
             sorted_indices = torch.argsort(mean_cosine_similarity, descending=True)
         elif type == "most_different":
             sorted_indices = torch.argsort(mean_cosine_similarity, descending=False)
