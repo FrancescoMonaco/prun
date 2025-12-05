@@ -28,7 +28,9 @@ log = logging.getLogger(__name__)
 # 1. It no longer returns PyTorch tensors (return_tensors="pt" removed).
 # 2. It returns a dictionary with 'input_ids' and 'attention_mask' as Python lists.
 # 3. It no longer does max_length padding (this is deferred to the Data Collator).
-def get_tokenized_data(dataset, tokenizer, dataset_name, max_length=128, return_tensors=False):
+def get_tokenized_data(
+    dataset, tokenizer, dataset_name, max_length=128, return_tensors=False
+):
     processed_dataset = []
     for item in dataset:
         text = get_text_from_item(item, dataset_name)
@@ -68,12 +70,19 @@ def get_tokenized_data(dataset, tokenizer, dataset_name, max_length=128, return_
 
 
 if __name__ == "__main__":
+    # TODO Add as argument the datasets to use and the model to prune
     # Pruning type from command line
     parser = argparse.ArgumentParser(description="Wanda Pruning Script")
     parser.add_argument(
         "--pruning_type",
         type=str,
-        choices=["most_similar", "random", "most_similar_decoupled", "most_dissimilar", "least_perplexity"],
+        choices=[
+            "most_similar",
+            "random",
+            "most_similar_decoupled",
+            "most_dissimilar",
+            "least_perplexity",
+        ],
         default="most_similar",
         help="Type of pruning to perform: 'most_similar', 'random', 'most_similar_decoupled', 'most_dissimilar', or 'least_perplexity'",
     )
@@ -91,8 +100,12 @@ if __name__ == "__main__":
 
     log.info(f"Loaded model {model_name} for embedding extraction.")
 
-    dataset_name = "ds1000"
-    dataset = get_dataset(dataset_name, split="train")
+    dataset_name = "gsm8k"
+    # Use train or test if the dataset doesn't have train
+    dataset = get_dataset(
+        dataset_name,
+        split="train" if "train" in get_dataset(dataset_name).keys() else "test",
+    )
     log.info(f"Loaded dataset {dataset_name} with {len(dataset)} samples.")
     # Preprocess dataset for similarity check
     subset_size = 5000
@@ -119,7 +132,9 @@ if __name__ == "__main__":
 
     # We now pass return_tensors=True to get_tokenized_data for the sampling part,
     # as the similarity check probably expects tensors.
-    tokenized_dataset = get_tokenized_data(dataset, tokenizer, dataset_name, return_tensors=True)
+    tokenized_dataset = get_tokenized_data(
+        dataset, tokenizer, dataset_name, return_tensors=True
+    )
 
     # Map pruning_type to prepare_calibration type
     calibration_type = "prototype"
@@ -153,7 +168,6 @@ if __name__ == "__main__":
     # We need to extract the Python list/array of IDs from the tensor for Dataset.from_list
     data_list = []
     for item in calibration_data_dicts:
-        # item['input_ids'] is expected to be a tensor here from use_embedding_for_sampling
         input_ids = item["input_ids"]
         attention_mask = item.get("attention_mask")
 
@@ -164,9 +178,7 @@ if __name__ == "__main__":
                 input_ids = input_ids.squeeze(0)
             input_ids = input_ids.cpu().numpy().tolist()
 
-            if attention_mask is not None and isinstance(
-                attention_mask, torch.Tensor
-            ):
+            if attention_mask is not None and isinstance(attention_mask, torch.Tensor):
                 if attention_mask.dim() == 2 and attention_mask.shape[0] == 1:
                     attention_mask = attention_mask.squeeze(0)
                 attention_mask = attention_mask.cpu().numpy().tolist()
@@ -190,7 +202,10 @@ if __name__ == "__main__":
         )
     )
     wanda_analyzer.compute_scores()
-    wanda_analyzer.plot(save_path=f"results/wanda_{pruning_type}_{dataset_name}.pdf", max_layers=20)
+    wanda_analyzer.plot(
+        save_path=f"results/wanda_{pruning_type}_{dataset_name}.pdf", max_layers=20
+    )
+    # TODO continue and save the pruned model's weights
     exit(0)
     # Define Wanda recipe
     recipe = WandaPruningModifier(sparsity=0.5, mask_structure="0:0", targets="__ALL__")
@@ -245,9 +260,4 @@ if __name__ == "__main__":
             f"{avg_loss:.4f}",
             f"{perplexity:.2f}",
             "Wanda 0.5",
-            "top 128 cosine",
-        ]
-    )
-    print(table)
-    # Send wandb info online
-    # wandb.finish()
+            "to

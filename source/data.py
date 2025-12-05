@@ -48,7 +48,7 @@ DATASET_MAPPING = {
     "wmt14": ("wmt14", "de-en"),
     "iwslt": ("iwslt2017", "iwslt2017-en-de"),
     "opc": ("openai_humaneval", None),
-    "ds1000": ("xlang-ai/DS-1000", None),
+    "ds1000": ("xlangai/DS-1000", None),
     "mbpp": ("mbpp", None),
 }
 

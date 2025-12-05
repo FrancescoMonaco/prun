@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import pandas as pd
+import numpy as np
 import matplotlib
 import argparse
 matplotlib.use("WebAgg")  # Use a non-interactive backend
@@ -29,6 +30,10 @@ if __name__ == "__main__":
         data.columns = ["pruning_type", "layer", "mean", "variance"]
         all_data = pd.concat([all_data, data], ignore_index=True)
     
+    # Calcola il coefficiente di variazione (CV)
+
+    all_data["cv"] = np.sqrt(all_data["variance"]) / all_data["mean"].abs()
+
     print(all_data.head())
     fig, ax = plt.subplots(figsize=(15, 6), ncols=3, nrows=1, layout="constrained", gridspec_kw={'width_ratios': [3, 3, 0.5]})
     sns.set_theme(style="white")
@@ -36,7 +41,7 @@ if __name__ == "__main__":
     strip1 = sns.stripplot(
         data=all_data,
         x="layer",
-        y="variance",
+        y="cv",
         hue="pruning_type",
         dodge=True,
         alpha=0.7,
