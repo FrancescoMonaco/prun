@@ -185,6 +185,7 @@ class WandaAnalysis:
             )
             plt.savefig(save_path, dpi=150)
             plt.close()
+            log.info(f"Wanda plots saved to {save_path}")
 
     def remove_hooks(self):
         """Detach all hooks."""

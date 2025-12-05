@@ -1,5 +1,5 @@
 from similarity_check import (
-    use_embedding_for_sampling,
+    prepare_calibration,
 )
 from wanda_analysis import WandaAnalysis
 from eval import evaluate_model
@@ -7,12 +7,9 @@ import torch
 from torch.utils.data import DataLoader
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding
-from data import get_dataset
+from data import get_dataset, get_text_from_item
 from datasets import Dataset
 
-import matplotlib
-
-matplotlib.use("Agg")  # Use a non-interactive backend
 from llmcompressor.modifiers.pruning import WandaPruningModifier
 from llmcompressor import oneshot
 import logging
@@ -31,13 +28,10 @@ log = logging.getLogger(__name__)
 # 1. It no longer returns PyTorch tensors (return_tensors="pt" removed).
 # 2. It returns a dictionary with 'input_ids' and 'attention_mask' as Python lists.
 # 3. It no longer does max_length padding (this is deferred to the Data Collator).
-def get_tokenized_data(dataset, tokenizer, max_length=128, return_tensors=False):
+def get_tokenized_data(dataset, tokenizer, dataset_name, max_length=128, return_tensors=False):
     processed_dataset = []
     for item in dataset:
-        # Adjust key based on dataset. Winogrande has 'sentence'.
-        text = item.get("sentence", item.get("text", ""))
-        if not text and "prompt" in item:
-            text = item["prompt"]
+        text = get_text_from_item(item, dataset_name)
 
         encoded = tokenizer(
             text,
@@ -79,9 +73,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pruning_type",
         type=str,
-        choices=["most_similar", "random", "most_similar_decoupled", "most_dissimilar"],
+        choices=["most_similar", "random", "most_similar_decoupled", "most_dissimilar", "least_perplexity"],
         default="most_similar",
-        help="Type of pruning to perform: 'most_similar', 'random', 'most_similar_decoupled', or 'most_dissimilar'",
+        help="Type of pruning to perform: 'most_similar', 'random', 'most_similar_decoupled', 'most_dissimilar', or 'least_perplexity'",
     )
     args = parser.parse_args()
     pruning_type = args.pruning_type
@@ -97,18 +91,18 @@ if __name__ == "__main__":
 
     log.info(f"Loaded model {model_name} for embedding extraction.")
 
-    dataset_name = "winogrande"
+    dataset_name = "ds1000"
     dataset = get_dataset(dataset_name, split="train")
     log.info(f"Loaded dataset {dataset_name} with {len(dataset)} samples.")
     # Preprocess dataset for similarity check
-    subset_size = 2000
+    subset_size = 5000
     if len(dataset) > subset_size:
         dataset = dataset.select(range(subset_size))
 
     # Evaluate the unpruned model first
     # eval_dataset = get_dataset(dataset_name, split="test")
     # tokenized_eval_data = get_tokenized_data(
-    #     eval_dataset, tokenizer, max_length=2048, return_tensors=False
+    #     eval_dataset, tokenizer, dataset_name, max_length=2048, return_tensors=False
     # )
     # eval_hf_dataset = Dataset.from_list(tokenized_eval_data)
     # data_collator = DataCollatorWithPadding(
@@ -123,68 +117,67 @@ if __name__ == "__main__":
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # avg_loss_original, perplexity_original = evaluate_model(model, dataloader, device, max_length=2048)
 
-    if pruning_type != "random":
-        # --- MODIFIED: tokenized_dataset for sampling/pruning ---
-        # We now pass return_tensors=True to get_tokenized_data for the sampling part,
-        # as the similarity check probably expects tensors.
-        tokenized_dataset = get_tokenized_data(dataset, tokenizer, return_tensors=True)
+    # We now pass return_tensors=True to get_tokenized_data for the sampling part,
+    # as the similarity check probably expects tensors.
+    tokenized_dataset = get_tokenized_data(dataset, tokenizer, dataset_name, return_tensors=True)
 
-        # Pick the calibration data from the dataset
-        calibration_data_dicts = (
-            use_embedding_for_sampling(  # Renamed from _tuples to _dicts
-                [tokenized_dataset],
-                model,
-                sample_per_dataset=128,
-                distance="flatten",
-                type="prototype"
-                if pruning_type == "most_similar"
-                else "most_different"
-                if pruning_type == "most_dissimilar"
-                else "decoupled",
-                save_calibration_distribution=False,
-                model_name=model_name.replace("/", "-"),
-                dataset_name=dataset_name,
-            )
-        )
-        log.info(f"Calibration data prepared: {len(calibration_data_dicts)} samples.")
+    # Map pruning_type to prepare_calibration type
+    calibration_type = "prototype"
+    if pruning_type == "most_similar":
+        calibration_type = "prototype"
+    elif pruning_type == "most_dissimilar":
+        calibration_type = "most_different"
+    elif pruning_type == "most_similar_decoupled":
+        calibration_type = "decoupled"
+    elif pruning_type == "least_perplexity":
+        calibration_type = "least_perplexity"
+    elif pruning_type == "random":
+        calibration_type = "random_sample"
 
-        # Convert calibration data to format expected by oneshot
-        # Assuming calibration_data_dicts returns dicts like {'input_ids': tensor(seq_len), ...}
-        # We need to extract the Python list/array of IDs from the tensor for Dataset.from_list
-        data_list = []
-        for item in calibration_data_dicts:
-            # item['input_ids'] is expected to be a tensor here from use_embedding_for_sampling
-            input_ids = item["input_ids"]
-            attention_mask = item.get("attention_mask")
+    # Pick the calibration data from the dataset
+    calibration_data_dicts = prepare_calibration(
+        model=model,
+        dataloader=[tokenized_dataset],
+        nsamples=128,
+        type=calibration_type,
+        distance="flatten",
+        save_calibration_distribution=False,
+        model_name=model_name.replace("/", "-"),
+        dataset_name=dataset_name,
+        tokenizer=tokenizer,
+    )
+    log.info(f"Calibration data prepared: {len(calibration_data_dicts)} samples.")
 
-            # Convert tensor to list of integers
-            if isinstance(input_ids, torch.Tensor):
-                # Ensure it's on CPU and convert to list
-                if input_ids.dim() == 2 and input_ids.shape[0] == 1:
-                    input_ids = input_ids.squeeze(0)
-                input_ids = input_ids.cpu().numpy().tolist()
+    # Convert calibration data to format expected by oneshot
+    # Assuming calibration_data_dicts returns dicts like {'input_ids': tensor(seq_len), ...}
+    # We need to extract the Python list/array of IDs from the tensor for Dataset.from_list
+    data_list = []
+    for item in calibration_data_dicts:
+        # item['input_ids'] is expected to be a tensor here from use_embedding_for_sampling
+        input_ids = item["input_ids"]
+        attention_mask = item.get("attention_mask")
 
-                if attention_mask is not None and isinstance(
-                    attention_mask, torch.Tensor
-                ):
-                    if attention_mask.dim() == 2 and attention_mask.shape[0] == 1:
-                        attention_mask = attention_mask.squeeze(0)
-                    attention_mask = attention_mask.cpu().numpy().tolist()
+        # Convert tensor to list of integers
+        if isinstance(input_ids, torch.Tensor):
+            # Ensure it's on CPU and convert to list
+            if input_ids.dim() == 2 and input_ids.shape[0] == 1:
+                input_ids = input_ids.squeeze(0)
+            input_ids = input_ids.cpu().numpy().tolist()
 
-            data_dict = {"input_ids": input_ids}
-            if attention_mask is not None:
-                data_dict["attention_mask"] = attention_mask
+            if attention_mask is not None and isinstance(
+                attention_mask, torch.Tensor
+            ):
+                if attention_mask.dim() == 2 and attention_mask.shape[0] == 1:
+                    attention_mask = attention_mask.squeeze(0)
+                attention_mask = attention_mask.cpu().numpy().tolist()
 
-            data_list.append(data_dict)
+        data_dict = {"input_ids": input_ids}
+        if attention_mask is not None:
+            data_dict["attention_mask"] = attention_mask
 
-        calibration_dataset = Dataset.from_list(data_list)
-    else:
-        # Random sampling for calibration dataset
-        calibration_samples = dataset.shuffle(seed=42).select(range(128))
-        calibration_data = get_tokenized_data(
-            calibration_samples, tokenizer, return_tensors=False
-        )
-        calibration_dataset = Dataset.from_list(calibration_data)
+        data_list.append(data_dict)
+
+    calibration_dataset = Dataset.from_list(data_list)
 
     # Collect Wanda statistics before pruning
     wanda_analyzer = WandaAnalysis(model, pruning_type=pruning_type)
@@ -197,7 +190,7 @@ if __name__ == "__main__":
         )
     )
     wanda_analyzer.compute_scores()
-    wanda_analyzer.plot(save_path=f"wanda_{pruning_type}_pruning.pdf", max_layers=20)
+    wanda_analyzer.plot(save_path=f"results/wanda_{pruning_type}_{dataset_name}.pdf", max_layers=20)
     exit(0)
     # Define Wanda recipe
     recipe = WandaPruningModifier(sparsity=0.5, mask_structure="0:0", targets="__ALL__")
@@ -220,7 +213,7 @@ if __name__ == "__main__":
     # Prepare the tokenized dataset for the DataLoader
     # NOTE: We pass return_tensors=False so the data collator handles the tensor conversion
     tokenized_eval_data = get_tokenized_data(
-        eval_dataset, tokenizer, max_length=512, return_tensors=False
+        eval_dataset, tokenizer, dataset_name, max_length=512, return_tensors=False
     )
 
     # Convert list of dicts to Hugging Face Dataset object for better integration

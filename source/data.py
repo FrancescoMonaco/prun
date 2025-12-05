@@ -53,6 +53,47 @@ DATASET_MAPPING = {
 }
 
 
+def get_text_from_item(item, dataset_name):
+    """
+    Extract text from a dataset item based on the dataset name.
+    """
+    if dataset_name in ["c4", "oscar", "redpajama", "pile", "mbpp"]:
+        return item.get("text", "")
+    elif dataset_name == "gsm8k":
+        return item.get("question", "")
+    elif dataset_name == "svamp":
+        return item.get("Body", "") + " " + item.get("Question", "")
+    elif dataset_name == "mawps":
+        return item.get("sQuestion", "")
+    elif dataset_name in ["anli_r1", "esnli", "rte"]:
+        return item.get("premise", "") + " " + item.get("hypothesis", "")
+    elif dataset_name == "boolq":
+        return item.get("passage", "") + " " + item.get("question", "")
+    elif dataset_name == "commonsense_qa":
+        return item.get("question", "")
+    elif dataset_name == "race":
+        return item.get("article", "") + " " + item.get("question", "")
+    elif dataset_name == "winogrande":
+        return item.get("sentence", "")
+    elif dataset_name == "wmt14":
+        return item.get("translation", {}).get("en", "")
+    elif dataset_name == "iwslt":
+        return item.get("translation", {}).get("en", "")
+    elif dataset_name in ["opc", "ds1000"]:
+        return item.get("prompt", "")
+    else:
+        # Fallback strategies
+        if "text" in item:
+            return item["text"]
+        if "sentence" in item:
+            return item["sentence"]
+        if "prompt" in item:
+            return item["prompt"]
+        if "question" in item:
+            return item["question"]
+        return str(item)
+
+
 def get_dataset(name, split=None):
     """
     Load a dataset by name. Downloads it to DATASETS_PATH if not present.

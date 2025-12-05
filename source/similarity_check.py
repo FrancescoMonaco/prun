@@ -18,8 +18,9 @@ import numpy as np
 def embedd_data(dataset, model, device="cuda:0", batch_size=32):
     model.eval()
 
+    # Let's pass in the embedding and first layer to obtain the embeddings
     embedding_layer = model.get_input_embeddings()
-    # embedding_layer.to(device) # It should already be on device if model is
+    embedding_layer.to(device)
 
     # Define a collate function to handle different input types
     def collate_fn(batch):
@@ -71,8 +72,19 @@ def cosine_similarity_vectorized(data):
     # Normalize the data along the vector dimension
     data_normalized = F.normalize(data.to(torch.float32), p=2, dim=1)
 
-    # Compute cosine similarity matrix using matrix multiplication
-    similarity_matrix = torch.matmul(data_normalized, data_normalized.T)
+    similarity_matrix = torch.zeros(
+        (data.shape[0], data.shape[0]), dtype=torch.float32, device=data.device
+    )
+
+    for i in range(0, data.shape[0], 512):
+        end_i = min(i + 512, data.shape[0])
+        batch = data_normalized[i:end_i]
+        with torch.amp.autocast(
+            "cuda",
+        ):
+            chunk = torch.matmul(batch, data_normalized.T)
+        similarity_matrix[i:end_i] = chunk
+
     return similarity_matrix
 
 
@@ -138,10 +150,28 @@ def use_embedding_for_sampling(
                 filename.format(model_name, dataset_name[indice], distance),
             )
 
-        if type == "prototype" or type == "decoupled":
+        if type == "prototype":
             sorted_indices = torch.argsort(mean_cosine_similarity, descending=True)
         elif type == "most_different":
             sorted_indices = torch.argsort(mean_cosine_similarity, descending=False)
+        if type == "decoupled":
+            # Select the most similar couples from the matrix
+            for i in range(sample_per_dataset // 2):
+                # Get the index of the maximum value in the matrix
+                max_val = torch.max(cosine_similarity_matrix)
+                max_index = torch.nonzero(
+                    cosine_similarity_matrix == max_val, as_tuple=False
+                )[0]
+                row_index = max_index[0].item()
+                col_index = max_index[1].item()
+
+                calibration_data.append(dataset[row_index])
+                calibration_data.append(dataset[col_index])
+
+                # Set the selected row and column to a very small value to avoid reselection
+                cosine_similarity_matrix[row_index, :] = -1.0
+                cosine_similarity_matrix[:, col_index] = -1.0
+            return calibration_data
 
         # print("ordering done", flush=True)
         for i in range(sample_per_dataset):
@@ -210,7 +240,14 @@ def use_embedding_for_sampling_iou(
 
     for indice, dataset in enumerate(dataloader):
         print("\nDataset {}".format(indice), flush=True)
-        data_0 = [d[0] for d in dataset]
+        data_0 = []
+        for d in dataset:
+            if isinstance(d, dict):
+                data_0.append(d["input_ids"])
+            elif isinstance(d, (list, tuple)):
+                data_0.append(d[0])
+            else:
+                data_0.append(d)
         iou_similarity_matrix = get_intersection_over_union(
             data_0, count_number_occurrence=count_number_occurrence
         )
@@ -271,7 +308,14 @@ def use_embedding_for_sampling_st(
     calibration_data = []
 
     for indice, dataset in enumerate(dataloader):
-        data_0 = [d[0] for d in dataset]
+        data_0 = []
+        for d in dataset:
+            if isinstance(d, dict):
+                data_0.append(d["input_ids"])
+            elif isinstance(d, (list, tuple)):
+                data_0.append(d[0])
+            else:
+                data_0.append(d)
         st_similarity_matrix = get_similarity_matrix_from_model(data_0, model)
 
         # Find the most similar embedding (prototipe)
@@ -286,6 +330,42 @@ def use_embedding_for_sampling_st(
 
         # TODO here check the cosine similarity across the selected samples, to see if they are diverse enough
         # or if they are similar to each other
+
+        for i in range(sample_per_dataset):
+            calibration_data.append(dataset[sorted_indices[i]])
+
+    return calibration_data
+
+
+def least_perplexity_sampling(
+    dataloader,
+    model,
+    sample_per_dataset,
+    tokenizer,
+):
+    calibration_data = []
+
+    for indice, dataset in enumerate(dataloader):
+        perplexities = []
+
+        for item in dataset:
+            if isinstance(item, dict):
+                input_ids = item["input_ids"]
+            elif isinstance(item, (list, tuple)):
+                input_ids = item[0]
+            else:
+                input_ids = item
+
+            input_ids = input_ids.unsqueeze(0).to(model.device)
+
+            with torch.no_grad():
+                outputs = model(input_ids, labels=input_ids)
+                loss = outputs.loss
+                perplexity = torch.exp(loss).item()
+                perplexities.append(perplexity)
+
+        perplexities_tensor = torch.tensor(perplexities)
+        sorted_indices = torch.argsort(perplexities_tensor, descending=False)
 
         for i in range(sample_per_dataset):
             calibration_data.append(dataset[sorted_indices[i]])
@@ -314,7 +394,7 @@ def prepare_calibration(
         calibration_data = torch.utils.data.ConcatDataset(dataloader)
     if type == "random_sample":
         calibration_data = random_sample(dataloader, sample_per_dataset)
-    elif type == "prototype" or type == "most_different":  # uses cosine similarity
+    elif type == "prototype" or type == "most_different" or type == "decoupled":  # uses cosine similarity
         calibration_data = use_embedding_for_sampling(
             dataloader,
             model,
@@ -350,6 +430,13 @@ def prepare_calibration(
             save_calibration_distribution=save_calibration_distribution,
             model_name=model_name,
             dataset_name=dataset_name,
+        )
+    elif type == "least_perplexity":
+        calibration_data = least_perplexity_sampling(
+            dataloader,
+            model,
+            sample_per_dataset,
+            tokenizer,
         )
 
     print(f"Calibration data prepared with {len(calibration_data)} samples.")

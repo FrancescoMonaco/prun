@@ -7,8 +7,10 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:1
 #SBATCH --partition=medium
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=francescopio.monaco@unitn.it
 
-conda activate prun
+#conda activate prun
 
 
 echo "Starting job 1: most_similar"
@@ -20,4 +22,8 @@ srun python source/prune.py --pruning_type=random
 echo "Starting job 3: most_dissimilar"
 srun python source/prune.py --pruning_type=most_dissimilar
 
-conda deactivate
+echo "Starting job 4: decoupled"
+srun python source/prune.py --pruning_type=most_similar_decoupled
+
+echo "Starting job 5: least_perplexity"
+srun python source/prune.py --pruning_type=least_perplexity
