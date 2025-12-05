@@ -27,4 +27,6 @@ def evaluate_model(
         use_accelerate (bool): Whether to use HuggingFace Accelerate for distributed evaluation.
         add_special_tokens (bool): Whether to add special tokens to the tokenizer.
     Returns:
-        dict: A dictionary with evaluation
+        dict: A dictionary with evaluation results.
+    """
+    pass

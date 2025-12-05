@@ -260,4 +260,9 @@ if __name__ == "__main__":
             f"{avg_loss:.4f}",
             f"{perplexity:.2f}",
             "Wanda 0.5",
-            "to
+            "top 128 cosine",
+        ]
+    )
+    print(table)
+    # Send wandb info online
+    # wandb.finish()
