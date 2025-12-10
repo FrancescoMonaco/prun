@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding
+from sentence_transformers import SentenceTransformer
 from data import get_dataset, get_text_from_item
 from datasets import Dataset
 
@@ -86,6 +87,12 @@ if __name__ == "__main__":
         default="most_similar",
         help="Type of pruning to perform: 'most_similar', 'random', 'most_similar_decoupled', 'most_dissimilar', or 'least_perplexity'",
     )
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=["winogrande"],
+        help="List of datasets to use for calibration",
+    )
     args = parser.parse_args()
     pruning_type = args.pruning_type
 
@@ -100,41 +107,47 @@ if __name__ == "__main__":
 
     log.info(f"Loaded model {model_name} for embedding extraction.")
 
-    dataset_name = "gsm8k"
-    # Use train or test if the dataset doesn't have train
-    dataset = get_dataset(
-        dataset_name,
-        split="train" if "train" in get_dataset(dataset_name).keys() else "test",
-    )
-    log.info(f"Loaded dataset {dataset_name} with {len(dataset)} samples.")
-    # Preprocess dataset for similarity check
+    dataset_names = args.datasets
+    log.info(f"Datasets to use: {dataset_names}")
+
+    sentence_trsf = SentenceTransformer("all-MiniLM-L12-v2", device="cuda")
     subset_size = 5000
-    if len(dataset) > subset_size:
-        dataset = dataset.select(range(subset_size))
+    
+    all_tokenized_data = []
+    
+    for d_name in dataset_names:
+        raw_dataset = get_dataset(d_name)
+        if raw_dataset is None:
+            log.warning(f"Could not load dataset {d_name}, skipping.")
+            continue
+            
+        # Determine split
+        if isinstance(raw_dataset, dict) or hasattr(raw_dataset, "keys"):
+             if "train" in raw_dataset.keys():
+                 dataset = raw_dataset["train"]
+             elif "test" in raw_dataset.keys():
+                 dataset = raw_dataset["test"]
+             else:
+                 dataset = raw_dataset[list(raw_dataset.keys())[0]]
+        else:
+            dataset = raw_dataset
 
-    # Evaluate the unpruned model first
-    # eval_dataset = get_dataset(dataset_name, split="test")
-    # tokenized_eval_data = get_tokenized_data(
-    #     eval_dataset, tokenizer, dataset_name, max_length=2048, return_tensors=False
-    # )
-    # eval_hf_dataset = Dataset.from_list(tokenized_eval_data)
-    # data_collator = DataCollatorWithPadding(
-    #     tokenizer=tokenizer, padding="max_length", max_length=2048
-    # )
-    # dataloader = DataLoader(
-    #     eval_hf_dataset,
-    #     batch_size=8,
-    #     collate_fn=data_collator,
-    #     shuffle=False,
-    # )
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # avg_loss_original, perplexity_original = evaluate_model(model, dataloader, device, max_length=2048)
-
-    # We now pass return_tensors=True to get_tokenized_data for the sampling part,
-    # as the similarity check probably expects tensors.
-    tokenized_dataset = get_tokenized_data(
-        dataset, tokenizer, dataset_name, return_tensors=True
-    )
+        log.info(f"Loaded dataset {d_name} with {len(dataset)} samples.")
+        
+        if len(dataset) > subset_size:
+            dataset = dataset.select(range(subset_size))
+            
+        # Tokenize
+        # We pass return_tensors=True to get_tokenized_data for the sampling part
+        tokenized_data = get_tokenized_data(
+            dataset, tokenizer, d_name, return_tensors=True
+        )
+        all_tokenized_data.extend(tokenized_data)
+        
+    log.info(f"Total tokenized samples: {len(all_tokenized_data)}")
+    
+    # Use a combined name for saving results
+    dataset_name = "_".join(dataset_names)
 
     # Map pruning_type to prepare_calibration type
     calibration_type = "prototype"
@@ -151,8 +164,8 @@ if __name__ == "__main__":
 
     # Pick the calibration data from the dataset
     calibration_data_dicts = prepare_calibration(
-        model=model,
-        dataloader=[tokenized_dataset],
+        model= model if pruning_type == "least_perplexity" else sentence_trsf,
+        dataloader=[all_tokenized_data],
         nsamples=128,
         type=calibration_type,
         distance="flatten",
@@ -202,8 +215,9 @@ if __name__ == "__main__":
         )
     )
     wanda_analyzer.compute_scores()
+    wanda_analyzer.compute_activations_stats()
     wanda_analyzer.plot(
-        save_path=f"results/wanda_{pruning_type}_{dataset_name}.pdf", max_layers=20
+        save_path=f"results/wanda_{pruning_type}_{dataset_name}.pdf"
     )
     # TODO continue and save the pruned model's weights
     exit(0)
@@ -223,12 +237,13 @@ if __name__ == "__main__":
 
     # Evaluate the pruned model
     log.info("Evaluating the pruned model...")
-    eval_dataset = get_dataset(dataset_name, split="test")
+    eval_dataset_name = dataset_names[0]
+    eval_dataset = get_dataset(eval_dataset_name, split="test")
 
     # Prepare the tokenized dataset for the DataLoader
     # NOTE: We pass return_tensors=False so the data collator handles the tensor conversion
     tokenized_eval_data = get_tokenized_data(
-        eval_dataset, tokenizer, dataset_name, max_length=512, return_tensors=False
+        eval_dataset, tokenizer, eval_dataset_name, max_length=512, return_tensors=False
     )
 
     # Convert list of dicts to Hugging Face Dataset object for better integration

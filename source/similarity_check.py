@@ -7,6 +7,9 @@ import torch.nn.functional as F
 
 # import wandb
 from transformers import AutoTokenizer
+from sentence_transformers import SentenceTransformer
+
+
 from data import get_dataset
 import nltk
 
@@ -16,56 +19,73 @@ import numpy as np
 
 
 def embedd_data(dataset, model, device="cuda:0", batch_size=32):
-    model.eval()
+        # Permetti di usare un sentence embedder opzionale
+        sentence_embedder = None
+        if hasattr(model, 'encode'):
+            # Assume che sia un sentence embedder tipo SentenceTransformer
+            sentence_embedder = model
 
-    # Let's pass in the embedding and first layer to obtain the embeddings
-    embedding_layer = model.get_input_embeddings()
-    embedding_layer.to(device)
+        if sentence_embedder is not None:
+            # dataset: lista di tuple (input_ids,) o dict con 'input_ids'
+            texts = []
+            for item in dataset:
+                if isinstance(item, dict):
+                    t = item.get("sentence", item.get("text", ""))
+                    if t == "":
+                        t = item.get("question", item.get("prompt", item.get("code", "")))
+                elif isinstance(item, (list, tuple)):
+                    # Se hai solo input_ids, non puoi decodificare senza tokenizer
+                    t = None
+                else:
+                    t = None
+                if t is not None:
+                    texts.append(t)
+            # Usa il sentence embedder
+            print("Embedding data with sentence embedder...", flush=True)
+            embeddings = sentence_embedder.encode(texts, batch_size=batch_size, device=device, convert_to_tensor=True)
+            print("Embedding done, shape = {}".format(embeddings.shape), flush=True)
+            return embeddings
 
-    # Define a collate function to handle different input types
-    def collate_fn(batch):
-        # batch is a list of items from dataset
-        input_ids_list = []
-        for item in batch:
-            if isinstance(item, dict):
-                t = item["input_ids"]
-            elif isinstance(item, (list, tuple)):
-                t = item[0]
+        # Altrimenti usa l'embedding layer del modello
+        model.eval()
+        embedding_layer = model.get_input_embeddings()
+        embedding_layer.to(device)
+
+        def collate_fn(batch):
+            input_ids_list = []
+            for item in batch:
+                if isinstance(item, dict):
+                    t = item["input_ids"]
+                elif isinstance(item, (list, tuple)):
+                    t = item[0]
+                else:
+                    t = item
+                if not isinstance(t, torch.Tensor):
+                    t = torch.tensor(t)
+                if t.dim() == 2 and t.shape[0] == 1:
+                    t = t.squeeze(0)
+                input_ids_list.append(t)
+            return torch.stack(input_ids_list)
+
+        data_loader = torch.utils.data.DataLoader(
+            dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False
+        )
+
+        all_embeddings = []
+        with torch.no_grad():
+            print("Embedding data...", flush=True)
+            for batch_input_ids in data_loader:
+                batch_input_ids = batch_input_ids.to(device)
+                embedding = embedding_layer(batch_input_ids)
+                all_embeddings.append(embedding.cpu())
+            if all_embeddings:
+                final_embeddings = torch.cat(all_embeddings, dim=0)
+                print(
+                    "Embedding done, shape = {}".format(final_embeddings.shape), flush=True
+                )
+                return final_embeddings
             else:
-                t = item
-
-            if not isinstance(t, torch.Tensor):
-                t = torch.tensor(t)
-
-            # Ensure shape is (Seq_Len,)
-            if t.dim() == 2 and t.shape[0] == 1:
-                t = t.squeeze(0)
-            input_ids_list.append(t)
-
-        return torch.stack(input_ids_list)
-
-    data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False
-    )
-
-    all_embeddings = []
-
-    with torch.no_grad():
-        print("Embedding data...", flush=True)
-
-        for batch_input_ids in data_loader:
-            batch_input_ids = batch_input_ids.to(device)
-            embedding = embedding_layer(batch_input_ids)
-            all_embeddings.append(embedding.cpu())
-
-        if all_embeddings:
-            final_embeddings = torch.cat(all_embeddings, dim=0)
-            print(
-                "Embedding done, shape = {}".format(final_embeddings.shape), flush=True
-            )
-            return final_embeddings
-        else:
-            return torch.tensor([])
+                return torch.tensor([])
 
 
 def cosine_similarity_vectorized(data):
@@ -394,7 +414,9 @@ def prepare_calibration(
         calibration_data = torch.utils.data.ConcatDataset(dataloader)
     if type == "random_sample":
         calibration_data = random_sample(dataloader, sample_per_dataset)
-    elif type == "prototype" or type == "most_different" or type == "decoupled":  # uses cosine similarity
+    elif (
+        type == "prototype" or type == "most_different" or type == "decoupled"
+    ):  # uses cosine similarity
         calibration_data = use_embedding_for_sampling(
             dataloader,
             model,
@@ -447,123 +469,78 @@ def prepare_calibration(
 if __name__ == "__main__":
     #    matplotlib.use('WebAgg')  # Use a non-interactive backend
     # For example use winogrande, mawps
-    dataset = get_dataset("mawps", split="train")
-    print(f"Loaded dataset with {len(dataset)} samples.")
+    # Esempio di caricamento dataset HuggingFace compatibile
+    from datasets import load_dataset
+    dataset = load_dataset("mu-nlpc/calc-mawps", split="train")
+    try:
+        dataset_len = len(dataset)
+    except Exception:
+        dataset_len = getattr(dataset, 'num_rows', None)
+    print(f"Loaded dataset with {dataset_len} samples.")
 
-    # Now let's use a small model Qwen/Qwen3-1.7B there is also 0.6B, 4B and 8nB
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    # Usa SentenceTransformer come sentence embedder
+    model_name = "all-MiniLM-L6-v2"
+    sentence_embedder = SentenceTransformer(model_name, device="cuda")
 
-    model_name = "Qwen/Qwen3-1.7B"
-    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    # Preprocess dataset: estrai testo
+    texts = []
+    for item in dataset:
+        if isinstance(item, dict):
+            text = item.get('sentence', '') or item.get('text', '')
+            if text == "":
+                text = item.get('question', '') or item.get('prompt', '') or item.get('code', '')
+            texts.append(text)
+        else:
+            # Se non è dict, prova a convertirlo o ignora
+            texts.append(str(item))
+    print(f"Preprocessed {len(texts)} samples.")
 
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    model.eval()
-    model.to("cuda:0")
-
-    # Preprocess dataset
-    print("Preprocessing dataset...")
-    processed_dataset = []
-    # Limit to a small number for testing
-    subset_size = 2**9
-    for i in range(min(len(dataset), subset_size)):
-        item = dataset[i]
-        text = item.get("sentence", item.get("text", ""))  # Handle winogrande or others
-        # If no sentence use 'question' or 'prompt' or 'code'
-        if text == "":
-            text = item.get("question", item.get("prompt", item.get("code", "")))
-        encoded = tokenizer(
-            text,
-            return_tensors="pt",
-            padding="max_length",
-            truncation=True,
-            max_length=256,
-        )
-        processed_dataset.append((encoded["input_ids"],))
-
-    dataset = processed_dataset
-    print(f"Preprocessed {len(dataset)} samples.")
-
-    embedd_data(dataset, model, device="cuda:0")
+    # Embedding con sentence embedder
+    embeddings = embedd_data(texts, sentence_embedder, device="cuda", batch_size=64)
     print("Embedding completed.")
 
-    # Compute the cosine similarity matrix
-    last_hidden_state_array_torch = embedd_data(dataset, model, device="cuda:0")
-    cosine_similarity_matrix = get_cosine_similarity(
-        last_hidden_state_array_torch, distance="flatten"
-    )
+    # Compute cosine similarity matrix
+    cosine_similarity_matrix = get_cosine_similarity(embeddings, distance="flatten")
     print("Cosine similarity matrix computed.")
 
-    # Pick 128 samples for calibration, use prototype for most similar or most_different for you know...
+    # Seleziona 128 campioni per la calibrazione
     calibration_data = use_embedding_for_sampling(
-        [dataset],
-        model,
+        [texts],
+        sentence_embedder,
         sample_per_dataset=128,
         distance="flatten",
         type="prototype",
         save_calibration_distribution=False,
-        model_name="qwen-1.8b",
-        dataset_name="winogrande",
+        model_name="all-MiniLM-L6-v2",
+        dataset_name="mawps",
     )
     print(f"Calibration data selected with {len(calibration_data)} samples.")
 
-    # Compare between pairs to see if cosine similarity is high
+    # Calcola similarità tra coppie
     threshold = 0.90
-    for i in range(calibration_data.__len__()):
-        for j in range(i + 1, calibration_data.__len__()):
+    for i in range(len(calibration_data)):
+        for j in range(i + 1, len(calibration_data)):
             cos_sim = cosine_similarity_matrix[i, j].item()
             if cos_sim > threshold:
                 print(f"Cosine similarity between sample {i} and sample {j}: {cos_sim}")
-                # Print the sentences
-                text_i = tokenizer.decode(
-                    calibration_data[i][0][0], skip_special_tokens=True
-                )
-                text_j = tokenizer.decode(
-                    calibration_data[j][0][0], skip_special_tokens=True
-                )
-                print(f"Sample {i}: {text_i}")
-                print(f"Sample {j}: {text_j}")
-    # Measure the n-gram overlap among the calibration samples using nltk
-    n = 3  # Trigram
-    ngram_overlap_matrix = np.zeros(
-        (calibration_data.__len__(), calibration_data.__len__())
-    )
+                print(f"Sample {i}: {calibration_data[i]}")
+                print(f"Sample {j}: {calibration_data[j]}")
+    # Calcola overlap n-gram
+    n = 3
+    ngram_overlap_matrix = np.zeros((len(calibration_data), len(calibration_data)))
     ngram_overlap_counts = []
-    for i in range(calibration_data.__len__()):
-        text_i = tokenizer.decode(calibration_data[i][0][0], skip_special_tokens=True)
-        ngrams_i = set(nltk.ngrams(text_i.split(), n))
-        for j in range(i + 1, calibration_data.__len__()):
-            text_j = tokenizer.decode(
-                calibration_data[j][0][0], skip_special_tokens=True
-            )
-            ngrams_j = set(nltk.ngrams(text_j.split(), n))
+    for i in range(len(calibration_data)):
+        ngrams_i = set(nltk.ngrams(calibration_data[i].split(), n))
+        for j in range(i + 1, len(calibration_data)):
+            ngrams_j = set(nltk.ngrams(calibration_data[j].split(), n))
             overlap = ngrams_i.intersection(ngrams_j)
             ngram_overlap_counts.append(len(overlap))
             ngram_overlap_matrix[i, j] = len(overlap)
             ngram_overlap_matrix[j, i] = len(overlap)
-            print(
-                f"N-gram overlap (n={n}) between sample {i} and sample {j}: {len(overlap)}"
-            )
+            print(f"N-gram overlap (n={n}) between sample {i} and sample {j}: {len(overlap)}")
             print(f"Sample {i} n-grams: {ngrams_i}")
             print(f"Sample {j} n-grams: {ngrams_j}")
-    # Plot histogram of n-gram overlaps
-    # plt.figure(figsize=(10, 6))
-    # plt.heatmap(ngram_overlap_matrix, annot=True, fmt="d", cmap="YlGnBu")
-    # plt.xlabel('Sample Index')
-    # plt.ylabel('Sample Index')
-    # plt.title(f'N-gram (n={n}) Overlap Counts among Calibration Samples')
-    # plt.show()
-    # Mean over the upper triangle
-    upper_triangle_indices = torch.triu_indices(
-        calibration_data.__len__(), calibration_data.__len__(), offset=1
-    )
-    mean_cosine_similarity = (
-        cosine_similarity_matrix[upper_triangle_indices[0], upper_triangle_indices[1]]
-        .mean()
-        .item()
-    )
-    print(
-        f"Mean cosine similarity among selected calibration samples: {mean_cosine_similarity}"
-    )
+    # Media sulla triangolare superiore
+    upper_triangle_indices = np.triu_indices(len(calibration_data), k=1)
+    mean_cosine_similarity = cosine_similarity_matrix[upper_triangle_indices].mean().item()
+    print(f"Mean cosine similarity among selected calibration samples: {mean_cosine_similarity}")

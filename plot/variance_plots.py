@@ -23,43 +23,73 @@ if __name__ == "__main__":
     data_dir = "results"
     files = [f for f in os.listdir(data_dir) if f.endswith(f"_{dataset_name}.txt")]
     # Add to a DataFram with columns: 'pruning_type', 'layer', 'mean', 'variance'
-    all_data = pd.DataFrame(columns=["pruning_type", "layer", "mean", "variance"])
+    all_data = pd.DataFrame()
     for file in files:
         data = pd.read_csv(os.path.join(data_dir, file))
         # Add the column names
-        data.columns = ["pruning_type", "layer", "mean", "variance"]
         all_data = pd.concat([all_data, data], ignore_index=True)
     
     # Calcola il coefficiente di variazione (CV)
 
-    all_data["cv"] = np.sqrt(all_data["variance"]) / all_data["mean"].abs()
-
-    print(all_data.head())
+    all_data["cv"] = np.sqrt(all_data[" var_activations"]) / all_data[" mean_activations"].abs()
+    
+    # Select only the last 20 layers, since the layes column contains names "model.layers.6.self_attn.o_proj"
+    all_data = all_data[all_data[" layer"].str.contains("layers")]
+    all_data[" layer"] = all_data[" layer"].apply(lambda x: x.split(".")[2])  # Extract the layer number
+    all_data[" layer"] = all_data[" layer"].astype(int)
+    all_data = all_data.sort_values(by=" layer")
+    # all_data = all_data[all_data[" layer"] >= (all_data[" layer"].max() - 7)]
+    
     fig, ax = plt.subplots(figsize=(15, 6), ncols=3, nrows=1, layout="constrained", gridspec_kw={'width_ratios': [3, 3, 0.5]})
     sns.set_theme(style="white")
 
-    strip1 = sns.stripplot(
+    sns.lineplot(
         data=all_data,
-        x="layer",
+        x=" layer",
         y="cv",
         hue="pruning_type",
-        dodge=True,
-        alpha=0.7,
-        ax=ax[0],
-        jitter=0.3
+        marker="o",
+        errorbar=None,
+        ax=ax[0]
     )
+    # Draw for each prunin_type the mean line
+    for pruning_type in all_data["pruning_type"].unique():
+        subset = all_data[all_data["pruning_type"] == pruning_type]
+        mean_pruning = subset.groupby("pruning_type")["cv"].mean()
+        print(mean_pruning)
+        ax[0].hlines(
+            y=mean_pruning,
+            xmin=all_data[" layer"].min(),
+            xmax=all_data[" layer"].max(),
+            colors=ax[0].lines[-1].get_color(),
+            linestyles="dashed",
+            label=f"{pruning_type} Mean"
+        )
+        
+
+    # strip1 = sns.stripplot(
+    #     data=all_data,
+    #     x=" layer",
+    #     y="cv",
+    #     hue="pruning_type",
+    #     dodge=True,
+    #     alpha=0.7,
+    #     ax=ax[0],
+    #     jitter=0.3
+    # )
     # Rotate ticks
     ax[0].set_xticklabels(ax[0].get_xticklabels(), rotation=45)
     ax[0].set_title(f"Variance Distribution per Layer")
     ax[0].set_xlabel("Layer")
     ax[0].set_ylabel("Wanda Variance")
+    #ax[0].set_yscale("log")
     # Remove legend from the first plot
     ax[0].legend_.remove()
 
     strip2 = sns.stripplot(
         data=all_data,
-        x="layer",
-        y="mean",
+        x=" layer",
+        y=" mean_activations",
         hue="pruning_type",
         dodge=True,
         alpha=0.7,
