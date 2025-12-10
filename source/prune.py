@@ -93,11 +93,17 @@ if __name__ == "__main__":
         default=["winogrande"],
         help="List of datasets to use for calibration",
     )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="Qwen/Qwen3-1.7B",
+        help="Model name or path to prune",
+    )
     args = parser.parse_args()
     pruning_type = args.pruning_type
+    model_name = args.model
 
     # Load model and tokenizer
-    model_name = "Qwen/Qwen3-1.7B"
     model = AutoModelForCausalLM.from_pretrained(
         model_name, dtype=torch.float16, device_map="auto", trust_remote_code=True
     )
@@ -217,7 +223,7 @@ if __name__ == "__main__":
     wanda_analyzer.compute_scores()
     wanda_analyzer.compute_activations_stats()
     wanda_analyzer.plot(
-        save_path=f"results/wanda_{pruning_type}_{dataset_name}.pdf"
+        save_path=f"results/wanda_{model_name.replace('/', '-')}_{pruning_type}_{dataset_name}.pdf"
     )
     # TODO continue and save the pruned model's weights
     exit(0)

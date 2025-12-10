@@ -42,7 +42,7 @@ DATASET_MAPPING = {
     "esnli": ("esnli", None),
     "rte": ("super_glue", "rte"),
     "boolq": ("google/boolq", None),
-    "commonsense_qa": ("commonsense_qa", None),
+    "commonsense_qa": ("tau/commonsense_qa", None),
     "race": ("race", "all"),
     "winogrande": ("allenai/winogrande", "winogrande_xl"),
     "wmt14": ("wmt14", "de-en"),
