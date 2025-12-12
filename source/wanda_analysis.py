@@ -30,7 +30,7 @@ class WandaAnalysis:
         # Stores final Wanda metrics
         self.wanda_mean = {}
         self.wanda_var = {}
-        
+
         # Store actiations
         self.activations_mean = {}
         self.activations_var = {}
@@ -83,7 +83,7 @@ class WandaAnalysis:
         # --- Collect mean and variance of activations ---
         activ_mean = flat.mean(dim=0)  # (H,)
         activ_var = flat.var(dim=0, unbiased=False)  # (H,)
-        if not hasattr(self, '_activ_samples'):
+        if not hasattr(self, "_activ_samples"):
             self._activ_samples = {}
         if module not in self.activations_mean:
             self.activations_mean[module] = activ_mean.clone()
@@ -121,8 +121,12 @@ class WandaAnalysis:
         """Calcola la media e la varianza finali delle attivazioni per ogni modulo."""
         for module in self.activations_mean:
             n = self._activ_samples[module]
-            self.activations_mean[module] = (self.activations_mean[module] / n).cpu().numpy()
-            self.activations_var[module] = (self.activations_var[module] / n).cpu().numpy()
+            self.activations_mean[module] = (
+                (self.activations_mean[module] / n).cpu().numpy()
+            )
+            self.activations_var[module] = (
+                (self.activations_var[module] / n).cpu().numpy()
+            )
 
     # ------------------------------
     # Public API
@@ -172,7 +176,9 @@ class WandaAnalysis:
             axes = np.array([axes])
 
         with open(save_path.replace(".pdf", ".txt"), "w") as f:
-            f.write("pruning_type, layer, mean_wanda, var_wanda, mean_activations, var_activations\n")
+            f.write(
+                "pruning_type,layer,mean_wanda,var_wanda,mean_activations,var_activations\n"
+            )
             for i, module in enumerate(modules):
                 mean_map = self.wanda_mean[module]
                 var_map = self.wanda_var[module]

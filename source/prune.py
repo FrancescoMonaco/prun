@@ -118,40 +118,40 @@ if __name__ == "__main__":
 
     sentence_trsf = SentenceTransformer("all-MiniLM-L12-v2", device="cuda")
     subset_size = 5000
-    
+
     all_tokenized_data = []
-    
+
     for d_name in dataset_names:
         raw_dataset = get_dataset(d_name)
         if raw_dataset is None:
             log.warning(f"Could not load dataset {d_name}, skipping.")
             continue
-            
+
         # Determine split
         if isinstance(raw_dataset, dict) or hasattr(raw_dataset, "keys"):
-             if "train" in raw_dataset.keys():
-                 dataset = raw_dataset["train"]
-             elif "test" in raw_dataset.keys():
-                 dataset = raw_dataset["test"]
-             else:
-                 dataset = raw_dataset[list(raw_dataset.keys())[0]]
+            if "train" in raw_dataset.keys():
+                dataset = raw_dataset["train"]
+            elif "test" in raw_dataset.keys():
+                dataset = raw_dataset["test"]
+            else:
+                dataset = raw_dataset[list(raw_dataset.keys())[0]]
         else:
             dataset = raw_dataset
 
         log.info(f"Loaded dataset {d_name} with {len(dataset)} samples.")
-        
+
         if len(dataset) > subset_size:
             dataset = dataset.select(range(subset_size))
-            
+
         # Tokenize
         # We pass return_tensors=True to get_tokenized_data for the sampling part
         tokenized_data = get_tokenized_data(
             dataset, tokenizer, d_name, return_tensors=True
         )
         all_tokenized_data.extend(tokenized_data)
-        
+
     log.info(f"Total tokenized samples: {len(all_tokenized_data)}")
-    
+
     # Use a combined name for saving results
     dataset_name = "_".join(dataset_names)
 
@@ -170,7 +170,7 @@ if __name__ == "__main__":
 
     # Pick the calibration data from the dataset
     calibration_data_dicts = prepare_calibration(
-        model= model if pruning_type == "least_perplexity" else sentence_trsf,
+        model=model if pruning_type == "least_perplexity" else sentence_trsf,
         dataloader=[all_tokenized_data],
         nsamples=128,
         type=calibration_type,
@@ -225,8 +225,9 @@ if __name__ == "__main__":
     wanda_analyzer.plot(
         save_path=f"results/wanda_{model_name.replace('/', '-')}_{pruning_type}_{dataset_name}.pdf"
     )
+    wanda_analyzer.remove_hooks()
     # TODO continue and save the pruned model's weights
-    exit(0)
+    # exit(0)
     # Define Wanda recipe
     recipe = WandaPruningModifier(sparsity=0.5, mask_structure="0:0", targets="__ALL__")
 
@@ -243,47 +244,28 @@ if __name__ == "__main__":
 
     # Evaluate the pruned model
     log.info("Evaluating the pruned model...")
-    eval_dataset_name = dataset_names[0]
-    eval_dataset = get_dataset(eval_dataset_name, split="test")
 
-    # Prepare the tokenized dataset for the DataLoader
-    # NOTE: We pass return_tensors=False so the data collator handles the tensor conversion
-    tokenized_eval_data = get_tokenized_data(
-        eval_dataset, tokenizer, eval_dataset_name, max_length=512, return_tensors=False
+    results = evaluate_model(
+        model_name=model_name,
+        model=model,
+        tokenizer=tokenizer,
+        task_list=dataset_names,
     )
-
-    # Convert list of dicts to Hugging Face Dataset object for better integration
-    eval_hf_dataset = Dataset.from_list(tokenized_eval_data)
-
-    # Initialize the Data Collator
-    data_collator = DataCollatorWithPadding(tokenizer=tokenizer, max_length=512)
-
-    dataloader = DataLoader(
-        eval_hf_dataset,
-        batch_size=8,
-        shuffle=False,
-        collate_fn=data_collator,  # <-- FIX for TypeError
-    )
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    log.info(f"Using device: {device}")
-
-    # Evaluate the model
-    avg_loss, perplexity = evaluate_model(model, dataloader, device, max_length=512)
     log.info("Pruned model evaluation completed.")
+
     # Summarize results in a table
     table = PrettyTable()
-    table.field_names = ["Model", "Avg Loss", "Perplexity", "Pruning", "Calibration"]
-    # table.add_row([model_name, f"{avg_loss_original:.4f}", f"{perplexity_original:.2f}", "Original", "N/A"])
-    table.add_row(
-        [
-            model_name,
-            f"{avg_loss:.4f}",
-            f"{perplexity:.2f}",
-            "Wanda 0.5",
-            "top 128 cosine",
-        ]
-    )
+    table.field_names = ["Task", "Metric", "Value"]
+
+    if results is not None and "results" in results:
+        for task, metrics in results["results"].items():
+            for metric, value in metrics.items():
+                # We only care about the main metric values, not the stderr or other metadata for now
+                # unless the user wants them. Let's print float values which are likely the metrics.
+                if isinstance(value, (int, float)) and "stderr" not in metric:
+                    table.add_row([task, metric, f"{value:.4f}"])
+
     print(table)
+
     # Send wandb info online
     # wandb.finish()

@@ -6,11 +6,9 @@ import torch
 import torch.nn.functional as F
 
 # import wandb
-from transformers import AutoTokenizer
 from sentence_transformers import SentenceTransformer
 
 
-from data import get_dataset
 import nltk
 
 # import matplotlib.pyplot as plt
@@ -19,73 +17,75 @@ import numpy as np
 
 
 def embedd_data(dataset, model, device="cuda:0", batch_size=32):
-        # Permetti di usare un sentence embedder opzionale
-        sentence_embedder = None
-        if hasattr(model, 'encode'):
-            # Assume che sia un sentence embedder tipo SentenceTransformer
-            sentence_embedder = model
+    # Permetti di usare un sentence embedder opzionale
+    sentence_embedder = None
+    if hasattr(model, "encode"):
+        # Assume che sia un sentence embedder tipo SentenceTransformer
+        sentence_embedder = model
 
-        if sentence_embedder is not None:
-            # dataset: lista di tuple (input_ids,) o dict con 'input_ids'
-            texts = []
-            for item in dataset:
-                if isinstance(item, dict):
-                    t = item.get("sentence", item.get("text", ""))
-                    if t == "":
-                        t = item.get("question", item.get("prompt", item.get("code", "")))
-                elif isinstance(item, (list, tuple)):
-                    # Se hai solo input_ids, non puoi decodificare senza tokenizer
-                    t = None
-                else:
-                    t = None
-                if t is not None:
-                    texts.append(t)
-            # Usa il sentence embedder
-            print("Embedding data with sentence embedder...", flush=True)
-            embeddings = sentence_embedder.encode(texts, batch_size=batch_size, device=device, convert_to_tensor=True)
-            print("Embedding done, shape = {}".format(embeddings.shape), flush=True)
-            return embeddings
-
-        # Altrimenti usa l'embedding layer del modello
-        model.eval()
-        embedding_layer = model.get_input_embeddings()
-        embedding_layer.to(device)
-
-        def collate_fn(batch):
-            input_ids_list = []
-            for item in batch:
-                if isinstance(item, dict):
-                    t = item["input_ids"]
-                elif isinstance(item, (list, tuple)):
-                    t = item[0]
-                else:
-                    t = item
-                if not isinstance(t, torch.Tensor):
-                    t = torch.tensor(t)
-                if t.dim() == 2 and t.shape[0] == 1:
-                    t = t.squeeze(0)
-                input_ids_list.append(t)
-            return torch.stack(input_ids_list)
-
-        data_loader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False
-        )
-
-        all_embeddings = []
-        with torch.no_grad():
-            print("Embedding data...", flush=True)
-            for batch_input_ids in data_loader:
-                batch_input_ids = batch_input_ids.to(device)
-                embedding = embedding_layer(batch_input_ids)
-                all_embeddings.append(embedding.cpu())
-            if all_embeddings:
-                final_embeddings = torch.cat(all_embeddings, dim=0)
-                print(
-                    "Embedding done, shape = {}".format(final_embeddings.shape), flush=True
-                )
-                return final_embeddings
+    if sentence_embedder is not None:
+        # dataset: lista di tuple (input_ids,) o dict con 'input_ids'
+        texts = []
+        for item in dataset:
+            if isinstance(item, dict):
+                t = item.get("sentence", item.get("text", ""))
+                if t == "":
+                    t = item.get("question", item.get("prompt", item.get("code", "")))
+            elif isinstance(item, (list, tuple)):
+                # Se hai solo input_ids, non puoi decodificare senza tokenizer
+                t = None
             else:
-                return torch.tensor([])
+                t = None
+            if t is not None:
+                texts.append(t)
+        # Usa il sentence embedder
+        print("Embedding data with sentence embedder...", flush=True)
+        embeddings = sentence_embedder.encode(
+            texts, batch_size=batch_size, device=device, convert_to_tensor=True
+        )
+        print("Embedding done, shape = {}".format(embeddings.shape), flush=True)
+        return embeddings
+
+    # Altrimenti usa l'embedding layer del modello
+    model.eval()
+    embedding_layer = model.get_input_embeddings()
+    embedding_layer.to(device)
+
+    def collate_fn(batch):
+        input_ids_list = []
+        for item in batch:
+            if isinstance(item, dict):
+                t = item["input_ids"]
+            elif isinstance(item, (list, tuple)):
+                t = item[0]
+            else:
+                t = item
+            if not isinstance(t, torch.Tensor):
+                t = torch.tensor(t)
+            if t.dim() == 2 and t.shape[0] == 1:
+                t = t.squeeze(0)
+            input_ids_list.append(t)
+        return torch.stack(input_ids_list)
+
+    data_loader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False
+    )
+
+    all_embeddings = []
+    with torch.no_grad():
+        print("Embedding data...", flush=True)
+        for batch_input_ids in data_loader:
+            batch_input_ids = batch_input_ids.to(device)
+            embedding = embedding_layer(batch_input_ids)
+            all_embeddings.append(embedding.cpu())
+        if all_embeddings:
+            final_embeddings = torch.cat(all_embeddings, dim=0)
+            print(
+                "Embedding done, shape = {}".format(final_embeddings.shape), flush=True
+            )
+            return final_embeddings
+        else:
+            return torch.tensor([])
 
 
 def cosine_similarity_vectorized(data):
@@ -471,11 +471,12 @@ if __name__ == "__main__":
     # For example use winogrande, mawps
     # Esempio di caricamento dataset HuggingFace compatibile
     from datasets import load_dataset
+
     dataset = load_dataset("mu-nlpc/calc-mawps", split="train")
     try:
         dataset_len = len(dataset)
     except Exception:
-        dataset_len = getattr(dataset, 'num_rows', None)
+        dataset_len = getattr(dataset, "num_rows", None)
     print(f"Loaded dataset with {dataset_len} samples.")
 
     # Usa SentenceTransformer come sentence embedder
@@ -486,9 +487,13 @@ if __name__ == "__main__":
     texts = []
     for item in dataset:
         if isinstance(item, dict):
-            text = item.get('sentence', '') or item.get('text', '')
+            text = item.get("sentence", "") or item.get("text", "")
             if text == "":
-                text = item.get('question', '') or item.get('prompt', '') or item.get('code', '')
+                text = (
+                    item.get("question", "")
+                    or item.get("prompt", "")
+                    or item.get("code", "")
+                )
             texts.append(text)
         else:
             # Se non è dict, prova a convertirlo o ignora
@@ -537,10 +542,16 @@ if __name__ == "__main__":
             ngram_overlap_counts.append(len(overlap))
             ngram_overlap_matrix[i, j] = len(overlap)
             ngram_overlap_matrix[j, i] = len(overlap)
-            print(f"N-gram overlap (n={n}) between sample {i} and sample {j}: {len(overlap)}")
+            print(
+                f"N-gram overlap (n={n}) between sample {i} and sample {j}: {len(overlap)}"
+            )
             print(f"Sample {i} n-grams: {ngrams_i}")
             print(f"Sample {j} n-grams: {ngrams_j}")
     # Media sulla triangolare superiore
     upper_triangle_indices = np.triu_indices(len(calibration_data), k=1)
-    mean_cosine_similarity = cosine_similarity_matrix[upper_triangle_indices].mean().item()
-    print(f"Mean cosine similarity among selected calibration samples: {mean_cosine_similarity}")
+    mean_cosine_similarity = (
+        cosine_similarity_matrix[upper_triangle_indices].mean().item()
+    )
+    print(
+        f"Mean cosine similarity among selected calibration samples: {mean_cosine_similarity}"
+    )

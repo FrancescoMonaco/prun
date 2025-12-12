@@ -1,6 +1,6 @@
 import torch
-from torch.utils.data import DataLoader
-from lm_eval import tasks, evaluator
+from lm_eval import simple_evaluate
+from lm_eval.models.huggingface import HFLM
 import logging
 
 FORMAT = "time=%(asctime)s level=%(levelname)s name=%(name)s msg=%(message)s"
@@ -29,4 +29,36 @@ def evaluate_model(
     Returns:
         dict: A dictionary with evaluation results.
     """
-    pass
+    log.info(f"Evaluating model {model_name} on tasks: {task_list}")
+
+    # Ensure model is on the correct device
+    if torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+
+    # Check if model is already on device (if it's not sharded)
+    try:
+        if model.device.type != device:
+            log.info(f"Moving model to {device}...")
+            model = model.to(device)
+    except AttributeError:
+        # Model might be sharded or not have .device
+        pass
+
+    log.info(f"Model device: {device}")
+
+    # Ensure tokenizer padding side is correct for decoder-only models
+    if tokenizer.padding_side != "left":
+        tokenizer.padding_side = "left"
+
+    # Wrap the model and tokenizer
+    hflm_model = HFLM(pretrained=model, tokenizer=tokenizer, batch_size=8)
+
+    results = simple_evaluate(
+        model=hflm_model,
+        tasks=task_list,
+        batch_size=8,
+        device=device,
+    )
+    return results

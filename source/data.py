@@ -31,7 +31,7 @@ os.makedirs(DATASETS_PATH, exist_ok=True)
 
 # Mapping from local name to HuggingFace dataset ID (and optional config)
 DATASET_MAPPING = {
-    "c4": ("allenai/c4", "en"),
+    "c4": ("allenai/c4", "en/c4-train.00049-of-01024.json.gz"),
     "oscar": ("oscar-corpus/OSCAR-2301", "en"),
     "redpajama": ("togethercomputer/RedPajama-Data-1T", None),
     "pile": ("monology/pile-uncopyrighted", None),
@@ -40,12 +40,12 @@ DATASET_MAPPING = {
     "mawps": ("MU-NLPC/Calc-mawps", None),
     "anli_r1": ("facebook/anli", None),
     "esnli": ("esnli", None),
-    "rte": ("super_glue", "rte"),
+    "rte": ("aps/super_glue", "rte"),
     "boolq": ("google/boolq", None),
     "commonsense_qa": ("tau/commonsense_qa", None),
     "race": ("race", "all"),
     "winogrande": ("allenai/winogrande", "winogrande_xl"),
-    "wmt14": ("wmt14", "de-en"),
+    "wmt14": ("wmt/wmt14", "de-en"),
     "iwslt": ("iwslt2017", "iwslt2017-en-de"),
     "opc": ("openai_humaneval", None),
     "ds1000": ("xlangai/DS-1000", None),
