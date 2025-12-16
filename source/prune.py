@@ -71,7 +71,6 @@ def get_tokenized_data(
 
 
 if __name__ == "__main__":
-    # TODO Add as argument the datasets to use and the model to prune
     # Pruning type from command line
     parser = argparse.ArgumentParser(description="Wanda Pruning Script")
     parser.add_argument(
@@ -227,7 +226,7 @@ if __name__ == "__main__":
     )
     wanda_analyzer.remove_hooks()
     # TODO continue and save the pruned model's weights
-    # exit(0)
+    exit(0)
     # Define Wanda recipe
     recipe = WandaPruningModifier(sparsity=0.5, mask_structure="0:0", targets="__ALL__")
 

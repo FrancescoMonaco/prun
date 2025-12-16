@@ -146,8 +146,11 @@ def use_embedding_for_sampling(
     save_calibration_distribution=False,
     model_name="model",
     dataset_name="dataset",
+    return_distribution=False,
 ):
     calibration_data = []
+    original_distributions = []
+    sample_distributions = []
 
     filename = "./out/cd/cd_{}_{}_{}.pt"
 
@@ -164,6 +167,9 @@ def use_embedding_for_sampling(
         mean_cosine_similarity = torch.mean(cosine_similarity_matrix, dim=1)
         # print("mean done", flush=True)
 
+        if return_distribution:
+            original_distributions.append(mean_cosine_similarity.cpu())
+
         if save_calibration_distribution:
             torch.save(
                 cosine_similarity_matrix.to(torch.float16),
@@ -176,6 +182,7 @@ def use_embedding_for_sampling(
             sorted_indices = torch.argsort(mean_cosine_similarity, descending=False)
         if type == "decoupled":
             # Select the most similar couples from the matrix
+            current_sample_values = []
             for i in range(sample_per_dataset // 2):
                 # Get the index of the maximum value in the matrix
                 max_val = torch.max(cosine_similarity_matrix)
@@ -187,16 +194,44 @@ def use_embedding_for_sampling(
 
                 calibration_data.append(dataset[row_index])
                 calibration_data.append(dataset[col_index])
+                
+                if return_distribution:
+                    # For decoupled, what is the metric? The pair similarity?
+                    # Or the mean similarity of the selected points?
+                    # The user asked for "distribution of a sample".
+                    # If we use mean_cosine_similarity as the metric for other types, we should probably use it here too.
+                    # But decoupled selects based on PAIR similarity.
+                    # Let's use mean_cosine_similarity of the selected points.
+                    current_sample_values.append(mean_cosine_similarity[row_index].cpu())
+                    current_sample_values.append(mean_cosine_similarity[col_index].cpu())
 
                 # Set the selected row and column to a very small value to avoid reselection
                 cosine_similarity_matrix[row_index, :] = -1.0
                 cosine_similarity_matrix[:, col_index] = -1.0
+            
+            if return_distribution:
+                sample_distributions.append(torch.stack(current_sample_values))
+            # Continue to next dataset (return was here before, but loop handles multiple datasets)
+            # Wait, the original code had `return calibration_data` inside the loop for decoupled!
+            # That means it only supported one dataset for decoupled?
+            # Yes: `return calibration_data` was inside `if type == "decoupled":`.
+            # But `if type == "decoupled":` is inside `for indice, dataset in enumerate(dataloader):`.
+            # So it returns after the first dataset.
+            # I should preserve this behavior or fix it. 
+            # Given I am just patching, I should preserve it, but now I need to return distributions too.
+            if return_distribution:
+                 return calibration_data, torch.cat(original_distributions), torch.cat(sample_distributions)
             return calibration_data
 
         # print("ordering done", flush=True)
         for i in range(sample_per_dataset):
             calibration_data.append(dataset[sorted_indices[i]])
+        
+        if return_distribution:
+            sample_distributions.append(mean_cosine_similarity[sorted_indices[:sample_per_dataset]].cpu())
 
+    if return_distribution:
+        return calibration_data, torch.cat(original_distributions), torch.cat(sample_distributions)
     return calibration_data
 
 
@@ -362,8 +397,11 @@ def least_perplexity_sampling(
     model,
     sample_per_dataset,
     tokenizer,
+    return_distribution=False,
 ):
     calibration_data = []
+    original_distributions = []
+    sample_distributions = []
 
     for indice, dataset in enumerate(dataloader):
         perplexities = []
@@ -385,11 +423,20 @@ def least_perplexity_sampling(
                 perplexities.append(perplexity)
 
         perplexities_tensor = torch.tensor(perplexities)
+        
+        if return_distribution:
+            original_distributions.append(perplexities_tensor)
+
         sorted_indices = torch.argsort(perplexities_tensor, descending=False)
 
         for i in range(sample_per_dataset):
             calibration_data.append(dataset[sorted_indices[i]])
+        
+        if return_distribution:
+            sample_distributions.append(perplexities_tensor[sorted_indices[:sample_per_dataset]])
 
+    if return_distribution:
+        return calibration_data, torch.cat(original_distributions), torch.cat(sample_distributions)
     return calibration_data
 
 
@@ -404,11 +451,15 @@ def prepare_calibration(
     dataset_name="dataset",
     count_number_occurrence=False,
     tokenizer=None,
+    return_distribution=False,
 ):
     """
     Prepare the calibration data by concatenating the datasets and limiting the number of samples.
     """
     sample_per_dataset = nsamples // len(dataloader)
+    
+    original_dist = None
+    sample_dist = None
 
     if type == "concat":
         calibration_data = torch.utils.data.ConcatDataset(dataloader)
@@ -417,7 +468,7 @@ def prepare_calibration(
     elif (
         type == "prototype" or type == "most_different" or type == "decoupled"
     ):  # uses cosine similarity
-        calibration_data = use_embedding_for_sampling(
+        result = use_embedding_for_sampling(
             dataloader,
             model,
             sample_per_dataset,
@@ -426,7 +477,12 @@ def prepare_calibration(
             save_calibration_distribution=save_calibration_distribution,
             model_name=model_name,
             dataset_name=dataset_name,
+            return_distribution=return_distribution,
         )
+        if return_distribution:
+            calibration_data, original_dist, sample_dist = result
+        else:
+            calibration_data = result
     elif (
         type == "prototype_iou" or type == "most_different_iou"
     ):  # uses intersection over union
@@ -454,15 +510,22 @@ def prepare_calibration(
             dataset_name=dataset_name,
         )
     elif type == "least_perplexity":
-        calibration_data = least_perplexity_sampling(
+        result = least_perplexity_sampling(
             dataloader,
             model,
             sample_per_dataset,
             tokenizer,
+            return_distribution=return_distribution,
         )
+        if return_distribution:
+            calibration_data, original_dist, sample_dist = result
+        else:
+            calibration_data = result
 
     print(f"Calibration data prepared with {len(calibration_data)} samples.")
 
+    if return_distribution:
+        return calibration_data, original_dist, sample_dist
     return calibration_data
 
 

@@ -15,7 +15,7 @@
 DATASET_PREF="--datasets"
 DATASETS=("winogrande" "gsm8k" "svamp" "boolq" "commonsense_qa" "ds1000" "race" "mawps" "wmt" "rte")
 MODEL_PREF="--model"
-MODELS=("meta-llama/Llama-3.2-1B" "Qwen3-1.7B")
+MODELS=("microsoft/Phi-2" "google/gemma-2b" ) #"Qwen/Qwen3-1.7B" "meta-llama/Llama-3.2-1B"
 PRUNING_PREF="--pruning_type"
 PRUNING_TYPES=("most_similar" "random" "most_dissimilar" "most_similar_decoupled" "least_perplexity")
 
@@ -34,6 +34,6 @@ echo "Starting plotting"
 for MODEL in "${MODELS[@]}"; do
     for DATASET in "${DATASETS[@]}"; do
         echo "Plotting results for model: $MODEL on dataset: $DATASET"
-        srun python source/plot_results.py $DATASET_PREF $DATASET $MODEL_PREF $MODEL
+        srun python plot/variance_plots.py --dataset $DATASET $MODEL_PREF $MODEL
     done
 done 

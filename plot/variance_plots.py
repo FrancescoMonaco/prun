@@ -101,7 +101,7 @@ if __name__ == "__main__":
         sns.lineplot(
             data=component_data,
             x="layer_num",
-            y="cv",
+            y="activations_variance",
             hue="pruning_type",
             marker="o",
             errorbar=None,
