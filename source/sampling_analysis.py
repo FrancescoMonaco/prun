@@ -1,5 +1,5 @@
 from prune import get_tokenized_data
-from similarity_check import prepare_calibration
+from similarity_check import prepare_calibration, embedd_data
 from scipy.stats import wasserstein_distance
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from sentence_transformers import SentenceTransformer
@@ -15,27 +15,9 @@ if __name__ == "__main__":
     sentence_transformer_model_name = "google/embeddinggemma-300m"#"sentence-transformers/all-MiniLM-L6-v2"
     model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.float16, device_map="auto", trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    sentence_tranformer = SentenceTransformer(sentence_transformer_model_name, device="cuda")
     
-    def get_embeddings(st_model, data, tokenizer):
-        texts = []
-        for item in data:
-            if isinstance(item, dict):
-                input_ids = item["input_ids"]
-            elif isinstance(item, (list, tuple)):
-                input_ids = item[0]
-            else:
-                input_ids = item
-            
-            if isinstance(input_ids, torch.Tensor):
-                input_ids = input_ids.cpu().tolist()
-                
-            texts.append(tokenizer.decode(input_ids, skip_special_tokens=True))
-            
-        return st_model.encode(texts, convert_to_tensor=True, show_progress_bar=False)
-
     with open("results/sampling_analysis.csv", "a+") as f:
-        f.write("dataset,most_similar,most_similar_decoupled,most_dissimilar,least_perplexity,random\n")
+        f.write("dataset,most_similar,decoupled,most_dissimilar,least_perplexity,random\n")
            
         for dataset_name in datasets:
             f.write(f"{dataset_name},")
@@ -56,16 +38,17 @@ if __name__ == "__main__":
             
             # Compute original distribution (Distances to Centroid)
             print(f"Computing original embeddings for {dataset_name}...", flush=True)
-            original_embeddings = get_embeddings(sentence_tranformer, tokenized_data, tokenizer)
+            original_embeddings_model = embedd_data(tokenized_data, model, device="cuda")
+            original_sentence_embeddings = embedd_data(tokenized_data, SentenceTransformer(sentence_transformer_model_name, device="cuda"), device="cuda")
             # centroid = torch.mean(original_embeddings, dim=0)
             # # Cosine distance = 1 - cosine similarity
             # original_dists = 1 - torch.nn.functional.cosine_similarity(original_embeddings, centroid.unsqueeze(0))
             # original_dists = original_dists.cpu().numpy()
-            original_dists = torch.norm(original_embeddings, dim=1).cpu().numpy()
+            original_dists = torch.norm(original_embeddings_model, dim=-1).view(-1).cpu().float().numpy()
 
             for pruning_type in [
                 "most_similar",
-                "most_similar_decoupled",
+                "decoupled",
                 "most_dissimilar",
                 "least_perplexity",
                 "random",
@@ -77,7 +60,7 @@ if __name__ == "__main__":
                     calibration_type = "prototype"
                 elif pruning_type == "most_dissimilar":
                     calibration_type = "most_different"
-                elif pruning_type == "most_similar_decoupled":
+                elif pruning_type == "decoupled":
                     calibration_type = "decoupled"
                 elif pruning_type == "least_perplexity":
                     calibration_type = "least_perplexity"
@@ -88,7 +71,7 @@ if __name__ == "__main__":
                 calibration = prepare_calibration(
                     model = model,
                     dataloader= [tokenized_data],
-                    nsamples= 128,
+                    nsamples= 256,
                     type=calibration_type,
                     distance="flatten",
                     save_calibration_distribution=False,
@@ -99,7 +82,7 @@ if __name__ == "__main__":
                 )
                 
                 # Compute sample distribution (Distances to Centroid)
-                sample_embeddings = get_embeddings(sentence_tranformer, calibration, tokenizer)
+                sample_embeddings = embedd_data(calibration, model, device="cuda")
                 # sample_dists = 1 - torch.nn.functional.cosine_similarity(sample_embeddings, centroid.unsqueeze(0))
                 # sample_dists = sample_dists.cpu().numpy()
                 # # Remove from both distributions the percentile extremes to avoid outliers
@@ -112,7 +95,7 @@ if __name__ == "__main__":
                 # original_dists = original_dists[(original_dists >= lower_orig) & (original_dists <= upper_orig)]
                 # sample_dists = sample_dists[(sample_dists >= lower_sample) & (sample_dists <= upper_sample)]
                 # Compare the distribution of the sample and the original dataset
-                sample_dists = torch.norm(sample_embeddings, dim=1).cpu().numpy()
+                sample_dists = torch.norm(sample_embeddings, dim=-1).view(-1).cpu().float().numpy()
                 distance = wasserstein_distance(original_dists, sample_dists)
                 
                 f.write(f"{distance},")
@@ -142,15 +125,16 @@ if __name__ == "__main__":
                 combined_tokenized_data.extend(tokenized_data)
             # Compute original distribution (Distances to Centroid)
             print(f"Computing original embeddings for {'_'.join(dataset_names)}...", flush=True)
-            original_embeddings = get_embeddings(sentence_tranformer, combined_tokenized_data, tokenizer)
-            centroid = torch.mean(original_embeddings, dim=0)
-            # Cosine distance = 1 - cosine similarity
-            original_dists = 1 - torch.nn.functional.cosine_similarity(original_embeddings, centroid.unsqueeze(0))
-            original_dists = original_dists.cpu().numpy()
+            original_embeddings = embedd_data(combined_tokenized_data, model, device="cuda")
+            # centroid = torch.mean(original_embeddings, dim=0)
+            # # Cosine distance = 1 - cosine similarity
+            # original_dists = 1 - torch.nn.functional.cosine_similarity(original_embeddings, centroid.unsqueeze(0))
+            # original_dists = original_dists.cpu().numpy()
+            original_dists = torch.norm(original_embeddings, dim=-1).view(-1).cpu().float().numpy()
 
             for pruning_type in [
                 "most_similar",
-                "most_similar_decoupled",
+                "decoupled",
                 "most_dissimilar",
                 "least_perplexity",
                 "random",
@@ -162,7 +146,7 @@ if __name__ == "__main__":
                     calibration_type = "prototype"
                 elif pruning_type == "most_dissimilar":
                     calibration_type = "most_different"
-                elif pruning_type == "most_similar_decoupled":
+                elif pruning_type == "decoupled":
                     calibration_type = "decoupled"
                 elif pruning_type == "least_perplexity":
                     calibration_type = "least_perplexity"
@@ -183,7 +167,7 @@ if __name__ == "__main__":
                     return_distribution=False,
                 )
                 # !!!Compute sample distribution (Distances to Centroid)
-                sample_embeddings = get_embeddings(sentence_tranformer, calibration, tokenizer)
+                sample_embeddings = embedd_data(calibration, model, device="cuda")
                 # sample_dists = 1 - torch.nn.functional.cosine_similarity(sample_embeddings, centroid.unsqueeze(0))
                 # sample_dists = sample_dists.cpu().numpy()
                 # # Remove from both distributions the percentile extremes to avoid outliers
@@ -198,8 +182,8 @@ if __name__ == "__main__":
                 # Compare the distribution of the sample and the original dataset
                 
                 # !!!Distibutions of norms
-                sample_dists = torch.norm(sample_embeddings, dim=1).cpu().numpy()
-                original_dists = torch.norm(original_embeddings, dim=1).cpu().numpy()
+                sample_dists = torch.norm(sample_embeddings, dim=-1).view(-1).cpu().float().numpy()
+                # original_dists = torch.norm(original_embeddings, dim=1).cpu().numpy()
                 distance = wasserstein_distance(original_dists, sample_dists)
                 f.write(f"{distance},")
                 f.flush()

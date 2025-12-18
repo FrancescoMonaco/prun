@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from transformers.pytorch_utils import Conv1D
 import logging
+import os
 
 FORMAT = "time=%(asctime)s level=%(levelname)s name=%(name)s msg=%(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -166,6 +167,7 @@ class WandaAnalysis:
 
     def plot(self, save_path="wanda_analysis.pdf", max_layers=None):
         """Creates a PDF with Wanda heatmaps."""
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         modules = list(self.wanda_mean.keys())
         if max_layers is not None:
             modules = modules[:max_layers]

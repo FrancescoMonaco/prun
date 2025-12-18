@@ -17,23 +17,30 @@ DATASETS=("winogrande" "gsm8k" "svamp" "boolq" "commonsense_qa" "ds1000" "race" 
 MODEL_PREF="--model"
 MODELS=("microsoft/Phi-2" "google/gemma-2b" "Qwen/Qwen3-1.7B" "meta-llama/Llama-3.2-1B")
 PRUNING_PREF="--pruning_type"
-PRUNING_TYPES=("most_similar" "random" "most_dissimilar" "most_similar_decoupled" "least_perplexity")
+PRUNING_TYPES=("most_similar" "random" "most_dissimilar" "decoupled" "least_perplexity")
+NUM_SAMPLES_PREFIX="--nsamples"
+NUM_SAMPLES=(128 512 1024)
 
 
 for MODEL in "${MODELS[@]}"; do
     for DATASET in "${DATASETS[@]}"; do
         for PRUNING_TYPE in "${PRUNING_TYPES[@]}"; do
-            echo "Running pruning for model: $MODEL on dataset: $DATASET with pruning type: $PRUNING_TYPE"
-            srun python source/prune.py $DATASET_PREF $DATASET $MODEL_PREF $MODEL $PRUNING_PREF $PRUNING_TYPE
+            for NSAMPLES in "${NUM_SAMPLES[@]}"; do
+                echo "Running pruning for model: $MODEL on dataset: $DATASET with pruning type: $PRUNING_TYPE and samples: $NSAMPLES"
+                srun python source/prune.py $DATASET_PREF $DATASET $MODEL_PREF $MODEL $PRUNING_PREF $PRUNING_TYPE $NUM_SAMPLES_PREFIX $NSAMPLES
+            done
         done
     done
-done
+done    
 
 
-echo "Starting plotting"
-for MODEL in "${MODELS[@]}"; do
-    for DATASET in "${DATASETS[@]}"; do
-        echo "Plotting results for model: $MODEL on dataset: $DATASET"
-        srun python plot/variance_plots.py --dataset $DATASET $MODEL_PREF $MODEL
-    done
-done 
+
+# echo "Starting plotting"
+# for MODEL in "${MODELS[@]}"; do
+#     for DATASET in "${DATASETS[@]}"; do
+#         for NSAMPLES in "${NUM_SAMPLES[@]}"; do
+#             echo "Plotting results for model: $MODEL on dataset: $DATASET with samples: $NSAMPLES"
+#             srun python plot/pruning_plots.py --dataset $DATASET $MODEL_PREF $MODEL --nsamples $NSAMPLES
+#         done
+#     done
+# done

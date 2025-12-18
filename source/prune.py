@@ -79,12 +79,12 @@ if __name__ == "__main__":
         choices=[
             "most_similar",
             "random",
-            "most_similar_decoupled",
+            "decoupled",
             "most_dissimilar",
             "least_perplexity",
         ],
         default="most_similar",
-        help="Type of pruning to perform: 'most_similar', 'random', 'most_similar_decoupled', 'most_dissimilar', or 'least_perplexity'",
+        help="Type of pruning to perform: 'most_similar', 'random', 'decoupled', 'most_dissimilar', or 'least_perplexity'",
     )
     parser.add_argument(
         "--datasets",
@@ -98,9 +98,16 @@ if __name__ == "__main__":
         default="Qwen/Qwen3-1.7B",
         help="Model name or path to prune",
     )
+    parser.add_argument(
+        "--nsamples",
+        type=int,
+        default=128,
+        help="Number of samples to use for calibration",
+    )
     args = parser.parse_args()
     pruning_type = args.pruning_type
     model_name = args.model
+    nsamples = args.nsamples
 
     # Load model and tokenizer
     model = AutoModelForCausalLM.from_pretrained(
@@ -160,7 +167,7 @@ if __name__ == "__main__":
         calibration_type = "prototype"
     elif pruning_type == "most_dissimilar":
         calibration_type = "most_different"
-    elif pruning_type == "most_similar_decoupled":
+    elif pruning_type == "decoupled":
         calibration_type = "decoupled"
     elif pruning_type == "least_perplexity":
         calibration_type = "least_perplexity"
@@ -171,7 +178,7 @@ if __name__ == "__main__":
     calibration_data_dicts = prepare_calibration(
         model=model if pruning_type == "least_perplexity" else sentence_trsf,
         dataloader=[all_tokenized_data],
-        nsamples=128,
+        nsamples=nsamples,
         type=calibration_type,
         distance="flatten",
         save_calibration_distribution=False,
@@ -221,9 +228,12 @@ if __name__ == "__main__":
     )
     wanda_analyzer.compute_scores()
     wanda_analyzer.compute_activations_stats()
-    wanda_analyzer.plot(
-        save_path=f"results/wanda_{model_name.replace('/', '-')}_{pruning_type}_{dataset_name}.pdf"
-    )
+    
+    import os
+    save_dir = os.path.join("results", model_name.replace("/", "-"), pruning_type, str(nsamples))
+    save_path = os.path.join(save_dir, f"{dataset_name}.pdf")
+    
+    wanda_analyzer.plot(save_path=save_path)
     wanda_analyzer.remove_hooks()
     # TODO continue and save the pruned model's weights
     exit(0)

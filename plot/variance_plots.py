@@ -34,23 +34,33 @@ if __name__ == "__main__":
         default="",
         help="Name of the model to plot variance distributions for",
     )
+    parser.add_argument(
+        "--nsamples",
+        type=int,
+        default=128,
+        help="Number of samples used",
+    )
     args = parser.parse_args()
     dataset_name = args.dataset
     model_name = args.model.replace("/", "-")
+    nsamples = args.nsamples
 
     # The data is in files named 'wanda_{model_name}_*_{dataset_name}.txt' where * is the pruning type
-    data_dir = "results"
-    files = [
-        f
-        for f in os.listdir(data_dir)
-        if f.startswith(f"wanda_{model_name}_") and f.endswith(f"_{dataset_name}.txt")
-    ]
-    # Add to a DataFram with columns: 'pruning_type', 'layer', 'wanda_mean', 'wanda_variance', 'mean_activations','var_activations'
+    # New structure: results/{model_name}/{pruning_type}/{nsamples}/{dataset_name}.txt
+    data_dir = os.path.join("results", model_name)
+    
     all_data = pd.DataFrame()
-    for file in files:
-        data = pd.read_csv(os.path.join(data_dir, file))
-        # Add the column names
-        all_data = pd.concat([all_data, data], ignore_index=True)
+    
+    if os.path.exists(data_dir):
+        for pruning_type in os.listdir(data_dir):
+            pt_dir = os.path.join(data_dir, pruning_type)
+            if os.path.isdir(pt_dir):
+                sample_dir = os.path.join(pt_dir, str(nsamples))
+                file_path = os.path.join(sample_dir, f"{dataset_name}.txt")
+                
+                if os.path.exists(file_path):
+                    data = pd.read_csv(file_path)
+                    all_data = pd.concat([all_data, data], ignore_index=True)
 
     # TODO Remove this line after rerunnning the experiments
     # Strip column names to remove the initial space

@@ -176,59 +176,73 @@ def use_embedding_for_sampling(
                 filename.format(model_name, dataset_name[indice], distance),
             )
 
-        if type == "prototype":
+        if type == "prototype" or type == "decoupled":
             sorted_indices = torch.argsort(mean_cosine_similarity, descending=True)
         elif type == "most_different":
             sorted_indices = torch.argsort(mean_cosine_similarity, descending=False)
+
         if type == "decoupled":
-            # Select the most similar couples from the matrix
-            current_sample_values = []
-            for i in range(sample_per_dataset // 2):
-                # Get the index of the maximum value in the matrix
-                max_val = torch.max(cosine_similarity_matrix)
-                max_index = torch.nonzero(
-                    cosine_similarity_matrix == max_val, as_tuple=False
-                )[0]
-                row_index = max_index[0].item()
-                col_index = max_index[1].item()
+            selected_indices = []
+            selected_input_ids = []
+            ngram_n = 3
+            ngram_threshold = 0.5
 
-                calibration_data.append(dataset[row_index])
-                calibration_data.append(dataset[col_index])
-                
-                if return_distribution:
-                    # For decoupled, what is the metric? The pair similarity?
-                    # Or the mean similarity of the selected points?
-                    # The user asked for "distribution of a sample".
-                    # If we use mean_cosine_similarity as the metric for other types, we should probably use it here too.
-                    # But decoupled selects based on PAIR similarity.
-                    # Let's use mean_cosine_similarity of the selected points.
-                    current_sample_values.append(mean_cosine_similarity[row_index].cpu())
-                    current_sample_values.append(mean_cosine_similarity[col_index].cpu())
+            for idx in sorted_indices:
+                if len(selected_indices) >= sample_per_dataset:
+                    break
 
-                # Set the selected row and column to a very small value to avoid reselection
-                cosine_similarity_matrix[row_index, :] = -1.0
-                cosine_similarity_matrix[:, col_index] = -1.0
-            
+                item = dataset[idx]
+                if isinstance(item, dict):
+                    input_ids = item["input_ids"]
+                elif isinstance(item, (list, tuple)):
+                    input_ids = item[0]
+                else:
+                    input_ids = item
+
+                if isinstance(input_ids, torch.Tensor):
+                    input_ids_list = input_ids.cpu().tolist()
+                else:
+                    input_ids_list = input_ids
+
+                is_similar = False
+                candidate_ngrams = set(nltk.ngrams(input_ids_list, ngram_n))
+
+                if len(candidate_ngrams) > 0:
+                    for selected_ids in selected_input_ids:
+                        selected_ngrams = set(nltk.ngrams(selected_ids, ngram_n))
+                        if len(selected_ngrams) == 0:
+                            continue
+
+                        intersection = len(candidate_ngrams.intersection(selected_ngrams))
+                        union = len(candidate_ngrams.union(selected_ngrams))
+                        jaccard = intersection / union
+
+                        if jaccard > ngram_threshold:
+                            is_similar = True
+                            break
+
+                if not is_similar:
+                    selected_indices.append(idx)
+                    selected_input_ids.append(input_ids_list)
+                    calibration_data.append(dataset[idx])
+
             if return_distribution:
-                sample_distributions.append(torch.stack(current_sample_values))
-            # Continue to next dataset (return was here before, but loop handles multiple datasets)
-            # Wait, the original code had `return calibration_data` inside the loop for decoupled!
-            # That means it only supported one dataset for decoupled?
-            # Yes: `return calibration_data` was inside `if type == "decoupled":`.
-            # But `if type == "decoupled":` is inside `for indice, dataset in enumerate(dataloader):`.
-            # So it returns after the first dataset.
-            # I should preserve this behavior or fix it. 
-            # Given I am just patching, I should preserve it, but now I need to return distributions too.
-            if return_distribution:
-                 return calibration_data, torch.cat(original_distributions), torch.cat(sample_distributions)
-            return calibration_data
+                if selected_indices:
+                    sample_distributions.append(
+                        mean_cosine_similarity[torch.stack(selected_indices)].cpu()
+                    )
+                else:
+                    sample_distributions.append(torch.tensor([]))
 
-        # print("ordering done", flush=True)
-        for i in range(sample_per_dataset):
-            calibration_data.append(dataset[sorted_indices[i]])
-        
-        if return_distribution:
-            sample_distributions.append(mean_cosine_similarity[sorted_indices[:sample_per_dataset]].cpu())
+        else:
+            # print("ordering done", flush=True)
+            for i in range(sample_per_dataset):
+                calibration_data.append(dataset[sorted_indices[i]])
+
+            if return_distribution:
+                sample_distributions.append(
+                    mean_cosine_similarity[sorted_indices[:sample_per_dataset]].cpu()
+                )
 
     if return_distribution:
         return calibration_data, torch.cat(original_distributions), torch.cat(sample_distributions)
