@@ -2,8 +2,10 @@
 Part of the code is adapted from: https://github.com/muraronicola/Muraro-Nicola-Master-Thesis
 """
 
+import os
 import torch
 import torch.nn.functional as F
+from joblib import Memory
 
 # import wandb
 from sentence_transformers import SentenceTransformer
@@ -14,6 +16,10 @@ import nltk
 # import matplotlib.pyplot as plt
 # import matplotlib
 import numpy as np
+
+# Setup cache directory
+cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".cache")
+memory = Memory(cache_dir, verbose=0)
 
 
 def embedd_data(dataset, model, device="cuda:0", batch_size=32):
@@ -213,7 +219,9 @@ def use_embedding_for_sampling(
                         if len(selected_ngrams) == 0:
                             continue
 
-                        intersection = len(candidate_ngrams.intersection(selected_ngrams))
+                        intersection = len(
+                            candidate_ngrams.intersection(selected_ngrams)
+                        )
                         union = len(candidate_ngrams.union(selected_ngrams))
                         jaccard = intersection / union
 
@@ -245,7 +253,11 @@ def use_embedding_for_sampling(
                 )
 
     if return_distribution:
-        return calibration_data, torch.cat(original_distributions), torch.cat(sample_distributions)
+        return (
+            calibration_data,
+            torch.cat(original_distributions),
+            torch.cat(sample_distributions),
+        )
     return calibration_data
 
 
@@ -437,7 +449,7 @@ def least_perplexity_sampling(
                 perplexities.append(perplexity)
 
         perplexities_tensor = torch.tensor(perplexities)
-        
+
         if return_distribution:
             original_distributions.append(perplexities_tensor)
 
@@ -445,15 +457,22 @@ def least_perplexity_sampling(
 
         for i in range(sample_per_dataset):
             calibration_data.append(dataset[sorted_indices[i]])
-        
+
         if return_distribution:
-            sample_distributions.append(perplexities_tensor[sorted_indices[:sample_per_dataset]])
+            sample_distributions.append(
+                perplexities_tensor[sorted_indices[:sample_per_dataset]]
+            )
 
     if return_distribution:
-        return calibration_data, torch.cat(original_distributions), torch.cat(sample_distributions)
+        return (
+            calibration_data,
+            torch.cat(original_distributions),
+            torch.cat(sample_distributions),
+        )
     return calibration_data
 
 
+@memory.cache(ignore=["model", "dataloader", "tokenizer"])
 def prepare_calibration(
     model,
     dataloader,
@@ -471,7 +490,7 @@ def prepare_calibration(
     Prepare the calibration data by concatenating the datasets and limiting the number of samples.
     """
     sample_per_dataset = nsamples // len(dataloader)
-    
+
     original_dist = None
     sample_dist = None
 

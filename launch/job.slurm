@@ -13,7 +13,7 @@
 #conda activate prun
 
 DATASET_PREF="--datasets"
-DATASETS=("winogrande" "gsm8k" "svamp" "boolq" "commonsense_qa" "ds1000" "race" "mawps" "wmt" "rte")
+DATASETS=("winogrande" "gsm8k") #"svamp" "boolq" "commonsense_qa" "ds1000" "race" "mawps" "wmt" "rte")
 MODEL_PREF="--model"
 MODELS=("microsoft/Phi-2" "google/gemma-2b" "Qwen/Qwen3-1.7B" "meta-llama/Llama-3.2-1B")
 PRUNING_PREF="--pruning_type"

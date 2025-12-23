@@ -123,7 +123,7 @@ if __name__ == "__main__":
     log.info(f"Datasets to use: {dataset_names}")
 
     sentence_trsf = SentenceTransformer("all-MiniLM-L12-v2", device="cuda")
-    subset_size = 5000
+    #subset_size = 5000
 
     all_tokenized_data = []
 
@@ -146,8 +146,8 @@ if __name__ == "__main__":
 
         log.info(f"Loaded dataset {d_name} with {len(dataset)} samples.")
 
-        if len(dataset) > subset_size:
-            dataset = dataset.select(range(subset_size))
+        # if len(dataset) > subset_size:
+        #     dataset = dataset.select(range(subset_size))
 
         # Tokenize
         # We pass return_tensors=True to get_tokenized_data for the sampling part
@@ -228,11 +228,14 @@ if __name__ == "__main__":
     )
     wanda_analyzer.compute_scores()
     wanda_analyzer.compute_activations_stats()
-    
+
     import os
-    save_dir = os.path.join("results", model_name.replace("/", "-"), pruning_type, str(nsamples))
+
+    save_dir = os.path.join(
+        "results", model_name.replace("/", "-"), pruning_type, str(nsamples)
+    )
     save_path = os.path.join(save_dir, f"{dataset_name}.pdf")
-    
+
     wanda_analyzer.plot(save_path=save_path)
     wanda_analyzer.remove_hooks()
     # TODO continue and save the pruned model's weights

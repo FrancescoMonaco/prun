@@ -179,7 +179,7 @@ class WandaAnalysis:
 
         with open(save_path.replace(".pdf", ".txt"), "w") as f:
             f.write(
-                "pruning_type,layer,wanda_max,wanda_mean,wanda_min,wanda_median,activations_max,activations_mean,activations_min,activations_median\n"
+                "pruning_type,layer,wanda_max,wanda_mean,wanda_min,wanda_median,activations_max,activations_mean,activations_min,activations_median,activations_var\n"
             )
             for i, module in enumerate(modules):
                 mean_map = self.wanda_mean[module]
@@ -213,7 +213,7 @@ class WandaAnalysis:
                 # plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
 
                 f.write(
-                    f"{self.pruning_type}, {name}, {mean_map.max():.3f}, {mean_map.mean():.3f}, {mean_map.min():.3f}, {np.median(mean_map):.3f}, {mean_activ.max():.3f}, {mean_activ.mean():.3f}, {mean_activ.min():.3f}, {np.median(mean_activ):.3f}\n"
+                    f"{self.pruning_type}, {name}, {mean_map.max():.3f}, {mean_map.mean():.3f}, {mean_map.min():.3f}, {np.median(mean_map):.3f}, {mean_activ.max():.3f}, {mean_activ.mean():.3f}, {mean_activ.min():.3f}, {np.median(mean_activ):.3f}, {mean_activ.var():.3f}\n"
                 )
 
             # plt.suptitle(
