@@ -186,6 +186,20 @@ def use_embedding_for_sampling(
             sorted_indices = torch.argsort(mean_cosine_similarity, descending=True)
         elif type == "most_different":
             sorted_indices = torch.argsort(mean_cosine_similarity, descending=False)
+        elif type == "distribution_matching":
+            # Match the distribution of mean similarities (quantiles)
+            sorted_indices_all = torch.argsort(mean_cosine_similarity)
+            idx_indices = torch.linspace(
+                0, len(sorted_indices_all) - 1, sample_per_dataset
+            ).long()
+            sorted_indices = sorted_indices_all[idx_indices]
+        elif type == "herding":
+            # Flatten embeddings if needed
+            if last_hidden_state_array_torch.dim() == 3:
+                emb = torch.mean(last_hidden_state_array_torch, dim=1)
+            else:
+                emb = last_hidden_state_array_torch
+            sorted_indices = herding(emb, sample_per_dataset)
 
         if type == "decoupled":
             selected_indices = []
@@ -472,6 +486,79 @@ def least_perplexity_sampling(
     return calibration_data
 
 
+def k_center_greedy(embeddings, n_samples):
+    """
+    Select n_samples from embeddings that maximize coverage (K-Center Greedy).
+    embeddings: (N, D) tensor
+    n_samples: number of samples to pick
+    returns: indices of picked samples
+    """
+    if n_samples >= embeddings.shape[0]:
+        return torch.arange(embeddings.shape[0])
+
+    device = embeddings.device
+    embeddings = embeddings.to(device)
+    N = embeddings.shape[0]
+
+    selected_indices = [0]
+    # Use squared Euclidean distance for efficiency
+    # (N, D) - (1, D) -> (N, D)
+    diff = embeddings - embeddings[0]
+    min_distances = torch.sum(diff * diff, dim=1)
+
+    for _ in range(1, n_samples):
+        # Pick the point furthest from its nearest center
+        new_idx = torch.argmax(min_distances).item()
+        selected_indices.append(new_idx)
+
+        diff = embeddings - embeddings[new_idx]
+        new_distances = torch.sum(diff * diff, dim=1)
+        min_distances = torch.min(min_distances, new_distances)
+
+    return torch.tensor(selected_indices)
+
+
+def herding(embeddings, n_samples):
+    """
+    Select n_samples from embeddings using Kernel Herding to match the mean embedding.
+    embeddings: (N, D) tensor
+    n_samples: number of samples to pick
+    returns: indices of picked samples
+    """
+    if n_samples >= embeddings.shape[0]:
+        return torch.arange(embeddings.shape[0])
+
+    device = embeddings.device
+    embeddings = embeddings.to(device)
+    # Normalize to work with cosine-like space
+    embeddings = F.normalize(embeddings, p=2, dim=1)
+    mu = torch.mean(embeddings, dim=0)
+
+    selected_indices = []
+    current_sum = torch.zeros_like(mu)
+
+    # Mask to avoid picking the same index
+    mask = torch.ones(embeddings.shape[0], device=device, dtype=torch.bool)
+
+    for t in range(1, n_samples + 1):
+        # We want to pick x such that (current_sum + x) / t is close to mu
+        # argmin || (current_sum + x) - t*mu ||^2
+        target = t * mu - current_sum
+
+        # Find x in embeddings that is closest to target
+        diff = embeddings - target
+        distances = torch.sum(diff * diff, dim=1)
+        distances[~mask] = float("inf")
+
+        best_idx = torch.argmin(distances).item()
+
+        selected_indices.append(best_idx)
+        current_sum += embeddings[best_idx]
+        mask[best_idx] = False
+
+    return torch.tensor(selected_indices)
+
+
 @memory.cache(ignore=["model", "dataloader", "tokenizer"])
 def prepare_calibration(
     model,
@@ -489,22 +576,30 @@ def prepare_calibration(
     """
     Prepare the calibration data by concatenating the datasets and limiting the number of samples.
     """
-    sample_per_dataset = nsamples // len(dataloader)
+    # If multiple datasets, we sample nsamples from each and then use coreset to pick nsamples from the union
+    if len(dataloader) > 1 and type != "concat":
+        initial_sample_per_dataset = nsamples
+    else:
+        initial_sample_per_dataset = nsamples // len(dataloader)
 
     original_dist = None
     sample_dist = None
 
     if type == "concat":
         calibration_data = torch.utils.data.ConcatDataset(dataloader)
-    if type == "random_sample":
-        calibration_data = random_sample(dataloader, sample_per_dataset)
+    elif type == "random_sample":
+        calibration_data = random_sample(dataloader, initial_sample_per_dataset)
     elif (
-        type == "prototype" or type == "most_different" or type == "decoupled"
+        type == "prototype"
+        or type == "most_different"
+        or type == "decoupled"
+        or type == "distribution_matching"
+        or type == "herding"
     ):  # uses cosine similarity
         result = use_embedding_for_sampling(
             dataloader,
             model,
-            sample_per_dataset,
+            initial_sample_per_dataset,
             distance,
             type=type,
             save_calibration_distribution=save_calibration_distribution,
@@ -522,7 +617,7 @@ def prepare_calibration(
         calibration_data = use_embedding_for_sampling_iou(
             dataloader,
             model,
-            sample_per_dataset,
+            initial_sample_per_dataset,
             count_number_occurrence,
             type=type,
             save_calibration_distribution=save_calibration_distribution,
@@ -535,7 +630,7 @@ def prepare_calibration(
         calibration_data = use_embedding_for_sampling_st(
             dataloader,
             model,
-            sample_per_dataset,
+            initial_sample_per_dataset,
             tokenizer,
             type=type,
             save_calibration_distribution=save_calibration_distribution,
@@ -546,7 +641,7 @@ def prepare_calibration(
         result = least_perplexity_sampling(
             dataloader,
             model,
-            sample_per_dataset,
+            initial_sample_per_dataset,
             tokenizer,
             return_distribution=return_distribution,
         )
@@ -554,6 +649,41 @@ def prepare_calibration(
             calibration_data, original_dist, sample_dist = result
         else:
             calibration_data = result
+
+    # Coreset resampling if we have multiple datasets
+    if len(dataloader) > 1 and type != "concat":
+        coreset_method = (
+            "Herding"
+            if type in ["herding", "distribution_matching"]
+            else "K-Center Greedy"
+        )
+        print(
+            f"Resampling from {len(calibration_data)} candidates to {nsamples} using coreset ({coreset_method})...",
+            flush=True,
+        )
+
+        # Convert ConcatDataset to list if necessary
+        if isinstance(calibration_data, torch.utils.data.ConcatDataset):
+            pool = [calibration_data[i] for i in range(len(calibration_data))]
+        else:
+            pool = calibration_data
+
+        # Embed the pool
+        pool_embeddings = embedd_data(pool, model, device="cuda:0")
+
+        # If embeddings are (N, L, D), mean pool them
+        if pool_embeddings.dim() == 3:
+            pool_embeddings = torch.mean(pool_embeddings, dim=1)
+
+        if type in ["herding", "distribution_matching"]:
+            selected_indices = herding(pool_embeddings, nsamples)
+        else:
+            selected_indices = k_center_greedy(pool_embeddings, nsamples)
+
+        calibration_data = [pool[i] for i in selected_indices]
+
+        if return_distribution and sample_dist is not None:
+            sample_dist = sample_dist[selected_indices]
 
     print(f"Calibration data prepared with {len(calibration_data)} samples.")
 
