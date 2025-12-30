@@ -7,12 +7,12 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --partition=medium
-#SBATCH --array=0-449  # 3 models * 10 datasets * 5 types * 3 samples = 450 tasks
+#SBATCH --array=0-179  # 3 models * 10 datasets * 2 types * 3 samples = 180 tasks
 
 # Define arrays
 DATASETS=("winogrande" "gsm8k" "svamp" "boolq" "commonsense_qa" "ds1000" "race" "mawps" "wmt" "rte")
 MODELS=("google/gemma-7b" "Qwen/Qwen3-8B" "meta-llama/Llama-3.2-3B")
-PRUNING_TYPES=("most_similar" "random" "most_dissimilar" "decoupled" "least_perplexity")
+PRUNING_TYPES=( "herding" "distribution_matching" ) #"most_similar" "random" "most_dissimilar" "decoupled" "least_perplexity")
 NUM_SAMPLES_PREFIX="--nsamples"
 NUM_SAMPLES=(128 512 1024)
 

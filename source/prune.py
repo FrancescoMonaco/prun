@@ -82,6 +82,8 @@ if __name__ == "__main__":
             "decoupled",
             "most_dissimilar",
             "least_perplexity",
+            "herding",
+            "distribution_matching",
         ],
         default="most_similar",
         help="Type of pruning to perform: 'most_similar', 'random', 'decoupled', 'most_dissimilar', or 'least_perplexity'",
