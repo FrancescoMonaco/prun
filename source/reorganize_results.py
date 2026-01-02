@@ -12,6 +12,7 @@ groups = {
 }
 
 def get_group(dataset_name):
+    if not isinstance(dataset_name, str): return "Other"
     if "_" in dataset_name:
         return "Mixed"
     for group_name, datasets in groups.items():
@@ -19,18 +20,51 @@ def get_group(dataset_name):
             return group_name
     return "Other"
 
-def reorganize_results(csv_path):
+def format_latex_comparison(df):
+    header = " & " + " & ".join(df.columns) + " \\\\\n\\midrule\n"
+    rows = []
+    for task, row in df.iterrows():
+        row_str = f"{task}"
+        # Compare Distribution Matching vs COLA
+        methods = [c for c in df.columns if c in ['distribution_matching', 'cola']]
+        best_method = None
+        if len(methods) == 2:
+            if row['distribution_matching'] > row['cola']:
+                best_method = 'distribution_matching'
+            elif row['cola'] > row['distribution_matching']:
+                best_method = 'cola'
+        
+        for col in df.columns:
+            val = row[col]
+            if pd.isna(val):
+                row_str += " & nan"
+            elif col == best_method:
+                row_str += f" & \\cellcolor{{blue!15}} \\textbf{{{val:.4f}}}"
+            else:
+                row_str += f" & {val:.4f}"
+        row_str += " \\\\"
+        rows.append(row_str)
+    
+    return "\\begin{tabular}{l" + "r" * len(df.columns) + "}\n\\toprule\n" + header + "\n".join(rows) + "\n\\bottomrule\n\\end{tabular}"
+
+def reorganize_results(csv_path, cola_csv_path):
     if not os.path.exists(csv_path):
         print(f"Error: {csv_path} not found.")
         return
 
-    df = pd.read_csv(csv_path)
+    df_main = pd.read_csv(csv_path)
+    df_main['group'] = df_main['calibration_datasets'].apply(get_group)
     
-    # Add group column
-    df['group'] = df['calibration_datasets'].apply(get_group)
+    df_cola = pd.DataFrame()
+    if os.path.exists(cola_csv_path):
+        df_cola = pd.read_csv(cola_csv_path)
+        # Standardize COLA columns to match main DF
+        df_cola = df_cola.rename(columns={'value': 'pruned_value'})
+        if 'datasets' in df_cola.columns:
+            df_cola['group'] = df_cola['datasets'].apply(get_group)
     
     # Filter out rows where pruned_value is NaN
-    df = df.dropna(subset=['pruned_value'])
+    df = df_main.dropna(subset=['pruned_value'])
 
     models = df['model'].unique()
     nsamples_list = df['nsamples'].unique()
@@ -46,15 +80,32 @@ def reorganize_results(csv_path):
                 continue
             
             # Average across calibration groups keeping tasks and pruning types separate
-            # First, average within each group for each (task, pruning_type)
             group_avg = model_ns_df.groupby(['task', 'pruning_type', 'group'])['pruned_value'].mean().reset_index()
-            
-            # Then average across groups
             final_avg = group_avg.groupby(['task', 'pruning_type'])['pruned_value'].mean().unstack()
-            
-            # Get original values (should be same for all pruning types/groups)
             orig_values = model_ns_df.groupby('task')['original_value'].first()
             final_avg.insert(0, 'original', orig_values)
+
+            # --- COLA vs Distribution Matching Comparison ---
+            comp_data = []
+            dist_match = model_ns_df[model_ns_df['pruning_type'] == 'distribution_matching']
+            if not dist_match.empty:
+                dist_avg = dist_match.groupby('task')['pruned_value'].mean()
+                for task, val in dist_avg.items():
+                    comp_data.append({'task': task, 'method': 'distribution_matching', 'value': val})
+            
+            if not df_cola.empty:
+                cola_match = df_cola[(df_cola['model'] == model) & (df_cola['nsamples'] == nsamples) & (df_cola['pruning_type'] == 'cola')]
+                if not cola_match.empty:
+                    cola_avg = cola_match.groupby('task')['pruned_value'].mean()
+                    for task, val in cola_avg.items():
+                        comp_data.append({'task': task, 'method': 'cola', 'value': val})
+            
+            comparison_df = pd.DataFrame()
+            if comp_data:
+                comp_df_raw = pd.DataFrame(comp_data)
+                comparison_df = comp_df_raw.pivot(index='task', columns='method', values='value')
+                comparison_df.insert(0, 'original', orig_values)
+                comparison_df = comparison_df.dropna()
 
             # Prepare Markdown version with bolding for top 3
             md_avg = final_avg.copy().astype(str)
@@ -109,14 +160,22 @@ def reorganize_results(csv_path):
                 f.write(md_avg.to_markdown())
                 f.write("\n\n")
                 
-                # Also provide LaTeX version
                 f.write("## LaTeX Table\n\n")
                 f.write("Note: Requires `\\usepackage[table]{xcolor}` in your LaTeX preamble.\n\n")
                 f.write("```latex\n")
                 f.write(latex_table_str)
-                f.write("\n```\n")
+                f.write("\n```\n\n")
+
+                if not comparison_df.empty:
+                    f.write("## Comparison: Distribution Matching vs COLA\n\n")
+                    f.write(comparison_df.to_markdown())
+                    f.write("\n\n")
+                    f.write("### LaTeX Comparison Table\n\n")
+                    f.write("```latex\n")
+                    f.write(format_latex_comparison(comparison_df))
+                    f.write("\n```\n")
 
             print(f"Saved summary for {model} ns={nsamples} to {filepath}")
 
 if __name__ == "__main__":
-    reorganize_results("results/experiment_results.csv")
+    reorganize_results("results/experiment_results.csv", "results/cola_experiment_results.csv")

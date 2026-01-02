@@ -193,6 +193,16 @@ def use_embedding_for_sampling(
                 0, len(sorted_indices_all) - 1, sample_per_dataset
             ).long()
             sorted_indices = sorted_indices_all[idx_indices]
+        elif type == "distribution_matching_no_outliers":
+            # Match the distribution but exclude the extreme 5% tails
+            sorted_indices_all = torch.argsort(mean_cosine_similarity)
+            N = len(sorted_indices_all)
+            start_idx = int(0.05 * N)
+            end_idx = int(0.95 * N)
+            idx_indices = torch.linspace(
+                start_idx, end_idx, sample_per_dataset
+            ).long()
+            sorted_indices = sorted_indices_all[idx_indices]
         elif type == "herding":
             # Flatten embeddings if needed
             if last_hidden_state_array_torch.dim() == 3:
@@ -594,6 +604,7 @@ def prepare_calibration(
         or type == "most_different"
         or type == "decoupled"
         or type == "distribution_matching"
+        or type == "distribution_matching_no_outliers"
         or type == "herding"
     ):  # uses cosine similarity
         result = use_embedding_for_sampling(
@@ -654,7 +665,7 @@ def prepare_calibration(
     if len(dataloader) > 1 and type != "concat":
         coreset_method = (
             "Herding"
-            if type in ["herding", "distribution_matching"]
+            if type in ["herding", "distribution_matching", "distribution_matching_no_outliers"]
             else "K-Center Greedy"
         )
         print(
@@ -675,7 +686,7 @@ def prepare_calibration(
         if pool_embeddings.dim() == 3:
             pool_embeddings = torch.mean(pool_embeddings, dim=1)
 
-        if type in ["herding", "distribution_matching"]:
+        if type in ["herding", "distribution_matching", "distribution_matching_no_outliers"]:
             selected_indices = herding(pool_embeddings, nsamples)
         else:
             selected_indices = k_center_greedy(pool_embeddings, nsamples)

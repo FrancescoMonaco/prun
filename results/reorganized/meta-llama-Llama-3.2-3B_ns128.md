@@ -2,32 +2,62 @@
 
 ## Average across Calibration Groups
 
-| task          |   original | decoupled   | distribution_matching   | herding    | least_perplexity   | most_dissimilar   | most_similar   | random     |
-|:--------------|-----------:|:------------|:------------------------|:-----------|:-------------------|:------------------|:---------------|:-----------|
-| arc_challenge |     0.4275 | 0.3311      | **0.4360**              | **0.4384** | **0.3474**         | 0.3327            | 0.3327         | 0.3327     |
-| arc_easy      |     0.7449 | **0.7226**  | 0.7176                  | 0.7204     | 0.7151             | **0.7233**        | **0.7233**     | 0.7225     |
-| boolq         |     0.7416 | 0.6494      | **0.7376**              | **0.7260** | 0.6466             | **0.6517**        | 0.6517         | 0.6376     |
-| hellaswag     |     0.5582 | 0.6354      | **0.6409**              | 0.6364     | **0.6417**         | 0.6355            | 0.6355         | **0.6404** |
-| openbookqa    |     0.312  | 0.3400      | **0.3510**              | **0.3450** | 0.3410             | 0.3425            | 0.3425         | **0.3485** |
-| rte           |     0.5415 | 0.5740      | 0.5632                  | **0.5848** | 0.5379             | **0.5794**        | **0.5794**     | 0.5722     |
-| winogrande    |     0.6938 | 0.6291      | **0.7005**              | **0.7005** | **0.6457**         | 0.6298            | 0.6298         | 0.6321     |
+| task          |   original | decoupled   | distribution_matching   | distribution_matching_no_outliers   | herding    | least_perplexity   | most_dissimilar   | most_similar   | random     |
+|:--------------|-----------:|:------------|:------------------------|:------------------------------------|:-----------|:-------------------|:------------------|:---------------|:-----------|
+| arc_challenge |     0.4275 | 0.3311      | **0.4360**              | **0.4411**                          | **0.4384** | 0.3474             | 0.3327            | 0.3327         | 0.3327     |
+| arc_easy      |     0.7449 | **0.7226**  | 0.7176                  | 0.7195                              | 0.7204     | 0.7151             | **0.7233**        | **0.7233**     | 0.7225     |
+| boolq         |     0.7416 | 0.6494      | **0.7376**              | **0.7401**                          | **0.7260** | 0.6466             | 0.6517            | 0.6517         | 0.6376     |
+| hellaswag     |     0.5582 | 0.6354      | **0.6409**              | 0.6403                              | 0.6364     | **0.6417**         | 0.6355            | 0.6355         | **0.6404** |
+| openbookqa    |     0.312  | 0.3400      | **0.3510**              | **0.3495**                          | 0.3450     | 0.3410             | 0.3425            | 0.3425         | **0.3485** |
+| rte           |     0.5415 | 0.5740      | 0.5632                  | 0.5776                              | **0.5848** | 0.5379             | **0.5794**        | **0.5794**     | 0.5722     |
+| winogrande    |     0.6938 | 0.6291      | **0.7005**              | **0.6981**                          | **0.7005** | 0.6457             | 0.6298            | 0.6298         | 0.6321     |
 
 ## LaTeX Table
 
 Note: Requires `\usepackage[table]{xcolor}` in your LaTeX preamble.
 
 ```latex
-\begin{tabular}{lrrrrrrrr}
+\begin{tabular}{lrrrrrrrrr}
 \toprule
- & original & decoupled & distribution_matching & herding & least_perplexity & most_dissimilar & most_similar & random \\
+ & original & decoupled & distribution_matching & distribution_matching_no_outliers & herding & least_perplexity & most_dissimilar & most_similar & random \\
 \midrule
-arc_challenge & 0.4275 & 0.3311 & \cellcolor{green!25} 0.4360 & \cellcolor{green!40} 0.4384 & \cellcolor{green!10} 0.3474 & 0.3327 & 0.3327 & 0.3327 \\
-arc_easy & 0.7449 & \cellcolor{green!10} 0.7226 & 0.7176 & 0.7204 & 0.7151 & \cellcolor{green!40} 0.7233 & \cellcolor{green!25} 0.7233 & 0.7225 \\
-boolq & 0.7416 & 0.6494 & \cellcolor{green!40} 0.7376 & \cellcolor{green!25} 0.7260 & 0.6466 & \cellcolor{green!10} 0.6517 & 0.6517 & 0.6376 \\
-hellaswag & 0.5582 & 0.6354 & \cellcolor{green!25} 0.6409 & 0.6364 & \cellcolor{green!40} 0.6417 & 0.6355 & 0.6355 & \cellcolor{green!10} 0.6404 \\
-openbookqa & 0.3120 & 0.3400 & \cellcolor{green!40} 0.3510 & \cellcolor{green!10} 0.3450 & 0.3410 & 0.3425 & 0.3425 & \cellcolor{green!25} 0.3485 \\
-rte & 0.5415 & 0.5740 & 0.5632 & \cellcolor{green!40} 0.5848 & 0.5379 & \cellcolor{green!25} 0.5794 & \cellcolor{green!10} 0.5794 & 0.5722 \\
-winogrande & 0.6938 & 0.6291 & \cellcolor{green!40} 0.7005 & \cellcolor{green!25} 0.7005 & \cellcolor{green!10} 0.6457 & 0.6298 & 0.6298 & 0.6321 \\
+arc_challenge & 0.4275 & 0.3311 & \cellcolor{green!10} 0.4360 & \cellcolor{green!40} 0.4411 & \cellcolor{green!25} 0.4384 & 0.3474 & 0.3327 & 0.3327 & 0.3327 \\
+arc_easy & 0.7449 & \cellcolor{green!10} 0.7226 & 0.7176 & 0.7195 & 0.7204 & 0.7151 & \cellcolor{green!40} 0.7233 & \cellcolor{green!25} 0.7233 & 0.7225 \\
+boolq & 0.7416 & 0.6494 & \cellcolor{green!25} 0.7376 & \cellcolor{green!40} 0.7401 & \cellcolor{green!10} 0.7260 & 0.6466 & 0.6517 & 0.6517 & 0.6376 \\
+hellaswag & 0.5582 & 0.6354 & \cellcolor{green!25} 0.6409 & 0.6403 & 0.6364 & \cellcolor{green!40} 0.6417 & 0.6355 & 0.6355 & \cellcolor{green!10} 0.6404 \\
+openbookqa & 0.3120 & 0.3400 & \cellcolor{green!40} 0.3510 & \cellcolor{green!25} 0.3495 & 0.3450 & 0.3410 & 0.3425 & 0.3425 & \cellcolor{green!10} 0.3485 \\
+rte & 0.5415 & 0.5740 & 0.5632 & 0.5776 & \cellcolor{green!40} 0.5848 & 0.5379 & \cellcolor{green!25} 0.5794 & \cellcolor{green!10} 0.5794 & 0.5722 \\
+winogrande & 0.6938 & 0.6291 & \cellcolor{green!40} 0.7005 & \cellcolor{green!10} 0.6981 & \cellcolor{green!25} 0.7005 & 0.6457 & 0.6298 & 0.6298 & 0.6321 \\
+\bottomrule
+\end{tabular}
+```
+
+## Comparison: Distribution Matching vs COLA
+
+| task          |   original |     cola |   distribution_matching |
+|:--------------|-----------:|---------:|------------------------:|
+| arc_challenge |   0.427474 | 0.431456 |                0.436007 |
+| arc_easy      |   0.744949 | 0.718575 |                0.717593 |
+| boolq         |   0.74159  | 0.735474 |                0.737615 |
+| hellaswag     |   0.558156 | 0.64119  |                0.640908 |
+| openbookqa    |   0.312    | 0.352667 |                0.351    |
+| rte           |   0.541516 | 0.536703 |                0.563177 |
+| winogrande    |   0.693765 | 0.702184 |                0.700474 |
+
+### LaTeX Comparison Table
+
+```latex
+\begin{tabular}{lrrr}
+\toprule
+ & original & cola & distribution_matching \\
+\midrule
+arc_challenge & 0.4275 & 0.4315 & \cellcolor{blue!15} \textbf{0.4360} \\
+arc_easy & 0.7449 & \cellcolor{blue!15} \textbf{0.7186} & 0.7176 \\
+boolq & 0.7416 & 0.7355 & \cellcolor{blue!15} \textbf{0.7376} \\
+hellaswag & 0.5582 & \cellcolor{blue!15} \textbf{0.6412} & 0.6409 \\
+openbookqa & 0.3120 & \cellcolor{blue!15} \textbf{0.3527} & 0.3510 \\
+rte & 0.5415 & 0.5367 & \cellcolor{blue!15} \textbf{0.5632} \\
+winogrande & 0.6938 & \cellcolor{blue!15} \textbf{0.7022} & 0.7005 \\
 \bottomrule
 \end{tabular}
 ```

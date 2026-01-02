@@ -84,6 +84,7 @@ if __name__ == "__main__":
             "least_perplexity",
             "herding",
             "distribution_matching",
+            "distribution_matching_no_outliers",
         ],
         default="most_similar",
         help="Type of pruning to perform: 'most_similar', 'random', 'decoupled', 'most_dissimilar', or 'least_perplexity'",
@@ -175,6 +176,7 @@ if __name__ == "__main__":
         calibration_type = "least_perplexity"
     elif pruning_type == "random":
         calibration_type = "random_sample"
+    
 
     # Pick the calibration data from the dataset
     calibration_data_dicts = prepare_calibration(
