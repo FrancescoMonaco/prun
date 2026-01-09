@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
 import numpy as np
+import nltk
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import Dataset
@@ -24,18 +25,69 @@ def get_token_counts(texts, tokenizer, max_length=128):
     counts = Counter()
     for text in tqdm(texts, desc="Tokenizing"):
         tokens = tokenizer.encode(text, truncation=True, max_length=max_length)
-        # Filter out pad tokens if needed, but here we want the distribution of actual tokens
-        # Filter out special tokens for a cleaner distribution if desired
+        # Filter out pad tokens 
+        tokens = [t for t in tokens if t != tokenizer.pad_token_id]        
+        # Filter out special tokens for a cleaner distribution
+        tokens = [t for t in tokens if t not in tokenizer.all_special_ids]        
         counts.update(tokens)
     return counts
 
-def plot_token_distribution(all_counts, labels, output_path, tokenizer, top_n=30):
-    plt.figure(figsize=(15, 8))
+def get_pos_counts(texts):
+    nltk.download('punkt', quiet=True)
+    nltk.download('averaged_perceptron_tagger', quiet=True)
+    nltk.download('punkt_tab', quiet=True)
+    nltk.download('averaged_perceptron_tagger_eng', quiet=True)
     
-    # We want to compare the frequency (percentage) to make it fair
+    counts = Counter()
+    for text in tqdm(texts, desc="POS Tagging"):
+        try:
+            tokens = nltk.word_tokenize(text)
+            tags = nltk.pos_tag(tokens)
+            # Map detailed tags to simpler categories if desired, or keep them
+            # Common tags: NN (Noun), VB (Verb), JJ (Adjective), RB (Adverb)
+            # We can group them:
+            simplified_tags = []
+            for word, tag in tags:
+                if tag.startswith('NN'): simplified_tags.append('Noun')
+                elif tag.startswith('VB'): simplified_tags.append('Verb')
+                elif tag.startswith('JJ'): simplified_tags.append('Adj')
+                elif tag.startswith('RB'): simplified_tags.append('Adv')
+                elif tag.startswith('PRP'): simplified_tags.append('Pron')
+                elif tag.startswith('IN'): simplified_tags.append('Prep')
+                elif tag.startswith('DT'): simplified_tags.append('Det')
+                else: simplified_tags.append('Other')
+            counts.update(simplified_tags)
+        except Exception as e:
+            continue
+    return counts
+
+def plot_pos_distribution(all_pos_counts, labels, output_path):
+    plt.figure(figsize=(15, 8))
     data = []
     
-    # Use the union of top tokens from the FULL DATASET to compare subsets against it
+    for counts, label in zip(all_pos_counts, labels):
+        total = sum(counts.values())
+        for pos, count in counts.items():
+            freq = (count / total) * 100 if total > 0 else 0
+            data.append({
+                "POS Tag": pos,
+                "Frequency (%)": freq,
+                "Method": label
+            })
+    
+    df = pd.DataFrame(data)
+    sns.barplot(data=df, x="POS Tag", y="Frequency (%)", hue="Method")
+    plt.title("Part-of-Speech Distribution Comparison")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(output_path)
+    print(f"POS distribution plot saved to {output_path}")
+
+def plot_token_distribution(all_counts, labels, output_path, tokenizer, top_n=30):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(22, 10))
+    
+    # --- Subplot 1: Bar chart of top tokens ---
+    data = []
     full_counts = all_counts[0]
     top_tokens = [t for t, c in full_counts.most_common(top_n)]
     
@@ -54,9 +106,38 @@ def plot_token_distribution(all_counts, labels, output_path, tokenizer, top_n=30
     
     df = pd.DataFrame(data)
     
-    sns.barplot(data=df, x="Token", y="Frequency (%)", hue="Method")
-    plt.title(f"Token Distribution Comparison (Top {top_n} Tokens of Full Dataset)")
-    plt.xticks(rotation=45, ha='right')
+    sns.barplot(data=df, x="Token", y="Frequency (%)", hue="Method", ax=ax1)
+    ax1.set_title(f"Top {top_n} Tokens Frequency Comparison")
+    ax1.tick_params(axis='x', rotation=45)
+    ax1.set_xlabel("Token (ID)")
+    
+    # --- Subplot 2: Zipf's Law Comparison (Log-Log) ---
+    for counts, label in zip(all_counts, labels):
+        freqs = sorted(counts.values(), reverse=True)
+        if not freqs:
+            continue
+        total = sum(freqs)
+        # Normalize to probability
+        freqs_norm = np.array(freqs) / total
+        ranks = np.arange(1, len(freqs_norm) + 1)
+        ax2.plot(ranks, freqs_norm, label=label, linewidth=2, alpha=0.8)
+    
+    # Reference Zipf curve: f(r) = 1/r
+    max_rank = max([len(c) for c in all_counts])
+    if max_rank > 0:
+        zipf_ranks = np.arange(1, max_rank + 1)
+        zipf_vals = 1.0 / zipf_ranks
+        zipf_vals /= zipf_vals.sum()
+        ax2.plot(zipf_ranks, zipf_vals, "k--", label="Theoretical Zipf (s=1)", alpha=0.6)
+
+    ax2.set_xscale("log")
+    ax2.set_yscale("log")
+    ax2.set_xlabel("Rank (log)")
+    ax2.set_ylabel("Frequency (log)")
+    ax2.set_title("Token Frequency vs Rank (Zipf's Law)")
+    ax2.legend()
+    ax2.grid(True, which="both", ls="-", alpha=0.2)
+    
     plt.tight_layout()
     plt.savefig(output_path)
     print(f"Plot saved to {output_path}")
@@ -84,7 +165,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pruning_types",
         nargs="+",
-        default=["cola", "random", "most_similar", "distribution_matching", "perplexity"],
+        default=["random", "most_similar", "distribution_matching", "least_perplexity"],
         help="Selection methods to compare",
     )
     parser.add_argument(
@@ -130,10 +211,12 @@ if __name__ == "__main__":
         all_texts_limited = all_texts
         
     # 2. Get full dataset token counts
-    print("Calculating full dataset token distribution...")
+    print("Calculating full dataset token and POS distribution...")
     full_counts = get_token_counts(all_texts_limited, tokenizer)
+    full_pos_counts = get_pos_counts(all_texts_limited)
     
     all_distributions = [full_counts]
+    all_pos_distributions = [full_pos_counts]
     labels = ["Full Dataset"]
     
     # 3. For each pruning type, get calibration data and count tokens
@@ -150,10 +233,11 @@ if __name__ == "__main__":
         })
     
     calibration_type_map = {
+        "random": "random_sample",
         "most_similar": "prototype",
         "most_dissimilar": "most_different",
         "decoupled": "decoupled",
-        "least_perplexity": "perplexity",
+        "least_perplexity": "least_perplexity",
         "herding": "herding",
         "distribution_matching": "distribution_matching",
     }
@@ -173,37 +257,46 @@ if __name__ == "__main__":
             )
             selected_texts = [s["text"] for s in selected_samples]
             counts = get_token_counts(selected_texts, tokenizer)
+            pos_counts = get_pos_counts(selected_texts)
             all_distributions.append(counts)
-            labels.append(p_type)
-            
-        elif p_type == "random":
-            import random
-            indices = random.sample(range(len(all_texts)), min(args.nsamples, len(all_texts)))
-            selected_texts = [all_texts[i] for i in indices]
-            counts = get_token_counts(selected_texts, tokenizer)
-            all_distributions.append(counts)
+            all_pos_distributions.append(pos_counts)
             labels.append(p_type)
             
         elif p_type in calibration_type_map:
             method = calibration_type_map[p_type]
             calib_data = prepare_calibration(
-                all_tokenized_data, 
-                args.nsamples, 
-                method=method,
-                model_name=args.model
+                model=model,
+                dataloader=[all_tokenized_data],
+                nsamples=args.nsamples,
+                type=method,
+                distance="flatten",
+                model_name=args.model.replace("/", "_"),
+                dataset_name=[args.dataset],
+                tokenizer=tokenizer,
             )
             counts = Counter()
+            selected_texts_for_pos = []
             for item in calib_data:
                 # Filter out padding tokens for counts
                 input_ids = item["input_ids"].tolist()
+                # Decode to get text for POS tagging
+                text = tokenizer.decode(input_ids, skip_special_tokens=True)
+                selected_texts_for_pos.append(text)
+                
                 if tokenizer.pad_token_id is not None:
                     input_ids = [tid for tid in input_ids if tid != tokenizer.pad_token_id]
                 counts.update(input_ids)
+            
+            pos_counts = get_pos_counts(selected_texts_for_pos)
             all_distributions.append(counts)
+            all_pos_distributions.append(pos_counts)
             labels.append(p_type)
         else:
             print(f"Unknown pruning type: {p_type}")
             
     # 4. Plot
     output_path = os.path.join(args.output_dir, f"{args.dataset}_token_dist.png")
-    plot_token_distribution(all_distributions, labels, output_path, tokenizer)
+    plot_token_distribution(all_distributions, labels, output_path, tokenizer, top_n=30)
+    
+    pos_output_path = os.path.join(args.output_dir, f"{args.dataset}_pos_dist.png")
+    plot_pos_distribution(all_pos_distributions, labels, pos_output_path)
