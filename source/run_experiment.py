@@ -85,7 +85,7 @@ def main():
     parser.add_argument("--datasets", nargs="+", default=["winogrande"], help="Datasets for calibration")
     parser.add_argument("--eval_tasks", nargs="+", default=["boolq","rte","hellaswag","winogrande","arc_challenge","arc_easy","openbookqa"], help="Tasks for evaluation (lm_eval names)")
     parser.add_argument("--compression_type", type=str, choices=["pruning", "quantization"], default="pruning", help="Type of compression to perform")
-    parser.add_argument("--pruning_types", nargs="+", choices=["most_similar", "random", "decoupled", "most_dissimilar", "least_perplexity", "herding", "distribution_matching", "distribution_matching_no_outliers"], default=["distribution_matching_no_outliers"], help="Types of pruning to perform")
+    parser.add_argument("--pruning_types", nargs="+", choices=["most_similar", "random", "decoupled", "most_dissimilar", "least_perplexity", "herding", "distribution_matching", "distribution_matching_no_outliers", "zipf"], default=["zipf"], help="Types of pruning to perform")
     parser.add_argument("--nsamples", type=int, default=128, help="Number of calibration samples")
     parser.add_argument("--sparsity", type=float, default=0.5, help="Pruning sparsity")
     parser.add_argument("--output_csv", type=str, default="results/experiment_results.csv", help="Output CSV file")
@@ -140,7 +140,8 @@ def main():
         "random": "random_sample",
         "herding": "herding",
         "distribution_matching": "distribution_matching",
-        "distribution_matching_no_outliers": "distribution_matching_no_outliers"
+        "distribution_matching_no_outliers": "distribution_matching_no_outliers",
+        "zipf": "zipf"
     }
 
     # 3. Loop through pruning types

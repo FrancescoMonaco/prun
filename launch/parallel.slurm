@@ -12,7 +12,7 @@
 # Define arrays
 DATASETS=("winogrande" "gsm8k" "svamp" "boolq" "commonsense_qa" "ds1000" "race" "mawps" "wmt" "rte")
 MODELS=("google/gemma-7b" "Qwen/Qwen3-8B" "meta-llama/Llama-3.2-3B")
-PRUNING_TYPES=( "distribution_matching_no_outliers" ) #"herding" "distribution_matching" "most_similar" "random" "most_dissimilar" "decoupled" "least_perplexity")
+PRUNING_TYPES=( "zipf" ) #"distribution_matching_no_outliers" ) #"herding" "distribution_matching" "most_similar" "random" "most_dissimilar" "decoupled" "least_perplexity")
 NUM_SAMPLES_PREFIX="--nsamples"
 NUM_SAMPLES=(128 512 1024)
 

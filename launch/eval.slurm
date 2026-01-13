@@ -23,7 +23,7 @@ SPARSITY_PREFIX="--sparsity"
 SPARSITY="0.25"
 NUM_SAMPLES=(128 512 1024)
 COMPRESSION_PREFIX="--compression_type"
-COMPRESSION_TYPE="quantization"
+COMPRESSION_TYPE="pruning"
 
 # Select model based on the SLURM array task id
 MODEL_INDEX=${SLURM_ARRAY_TASK_ID:-0}

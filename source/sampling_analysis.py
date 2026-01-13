@@ -120,6 +120,7 @@ if __name__ == "__main__":
                 "random",
                 "herding",
                 "distribution_matching",
+                "zipf",
             ]:
                 # Map pruning_type to prepare_calibration type
                 calibration_type = "prototype"
@@ -137,6 +138,8 @@ if __name__ == "__main__":
                     calibration_type = "herding"
                 elif pruning_type == "distribution_matching":
                     calibration_type = "distribution_matching"
+                elif pruning_type == "zipf":
+                    calibration_type = "zipf"
 
                 # Prepare the calibration sample
                 calibration = prepare_calibration(
@@ -211,6 +214,7 @@ if __name__ == "__main__":
                 "random",
                 "herding",
                 "distribution_matching",
+                "zipf",
             ]:
                 # Map pruning_type to prepare_calibration type
                 calibration_type = "prototype"
@@ -228,6 +232,8 @@ if __name__ == "__main__":
                     calibration_type = "herding"
                 elif pruning_type == "distribution_matching":
                     calibration_type = "distribution_matching"
+                elif pruning_type == "zipf":
+                    calibration_type = "zipf"
 
                 # Prepare the calibration sample
                 calibration = prepare_calibration(

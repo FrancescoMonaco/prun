@@ -7,6 +7,7 @@ import seaborn as sns
 import argparse
 import numpy as np
 import nltk
+from scipy.stats import entropy
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import Dataset
@@ -24,12 +25,22 @@ except ImportError as e:
 def get_token_counts(texts, tokenizer, max_length=128):
     counts = Counter()
     for text in tqdm(texts, desc="Tokenizing"):
-        tokens = tokenizer.encode(text, truncation=True, max_length=max_length)
-        # Filter out pad tokens 
-        tokens = [t for t in tokens if t != tokenizer.pad_token_id]        
+        # Lowercase the text to treat 'The' and 'the' the same
+        text = text.lower()
+        tokens = tokenizer.tokenize(text, truncation=True, max_length=max_length)
+        
         # Filter out special tokens for a cleaner distribution
-        tokens = [t for t in tokens if t not in tokenizer.all_special_ids]        
-        counts.update(tokens)
+        tokens = [t for t in tokens if t not in tokenizer.all_special_tokens]        
+        
+        # Standardize tokens by removing subword markers (e.g., ' ' for Gemma/Llama or 'Ġ' for GPT-style)
+        # and stripping whitespace. This ensures ' the' and 'the' are counted together.
+        processed_tokens = []
+        for t in tokens:
+            clean_t = t.replace(' ', '').replace('Ġ', '').strip()
+            if clean_t:
+                processed_tokens.append(clean_t)
+        
+        counts.update(processed_tokens)
     return counts
 
 def get_pos_counts(texts):
@@ -41,7 +52,8 @@ def get_pos_counts(texts):
     counts = Counter()
     for text in tqdm(texts, desc="POS Tagging"):
         try:
-            tokens = nltk.word_tokenize(text)
+            # Lowercase for consistent POS tagging frequency
+            tokens = nltk.word_tokenize(text.lower())
             tags = nltk.pos_tag(tokens)
             # Map detailed tags to simpler categories if desired, or keep them
             # Common tags: NN (Noun), VB (Verb), JJ (Adjective), RB (Adverb)
@@ -60,6 +72,31 @@ def get_pos_counts(texts):
         except Exception as e:
             continue
     return counts
+
+def calculate_kl(full_counts, subset_counts):
+    # Get all tokens present in either distribution
+    all_tokens = sorted(list(set(full_counts.keys()) | set(subset_counts.keys())))
+    
+    # Convert counts to probability distributions
+    p = np.array([full_counts.get(t, 0) for t in all_tokens], dtype=np.float64)
+    q = np.array([subset_counts.get(t, 0) for t in all_tokens], dtype=np.float64)
+    
+    # Normalize
+    p_sum = p.sum()
+    q_sum = q.sum()
+    
+    if p_sum == 0 or q_sum == 0:
+        return float('inf')
+        
+    p /= p_sum
+    q /= q_sum
+    
+    # Add epsilon to q to avoid infinite KL if a token in P is missing in Q
+    epsilon = 1e-10
+    q = q + epsilon
+    q /= q.sum()
+    
+    return entropy(p, q)
 
 def plot_pos_distribution(all_pos_counts, labels, output_path):
     plt.figure(figsize=(15, 8))
@@ -93,13 +130,12 @@ def plot_token_distribution(all_counts, labels, output_path, tokenizer, top_n=30
     
     for counts, label in zip(all_counts, labels):
         total = sum(counts.values())
-        for token_id in top_tokens:
-            freq = (counts[token_id] / total) * 100 if total > 0 else 0
-            token_text = f"'{tokenizer.decode([token_id])}' ({token_id})"
+        for token_text in top_tokens:
+            freq = (counts[token_text] / total) * 100 if total > 0 else 0
             # Escape some special characters for plot
-            token_text = token_text.replace("\n", "\\n").replace("\r", "\\r")
+            cleaned_display = str(token_text).replace("\n", "\\n").replace("\r", "\\r")
             data.append({
-                "Token": token_text,
+                "Token": f"'{cleaned_display}'",
                 "Frequency (%)": freq,
                 "Method": label
             })
@@ -109,8 +145,8 @@ def plot_token_distribution(all_counts, labels, output_path, tokenizer, top_n=30
     sns.barplot(data=df, x="Token", y="Frequency (%)", hue="Method", ax=ax1)
     ax1.set_title(f"Top {top_n} Tokens Frequency Comparison")
     ax1.tick_params(axis='x', rotation=45)
-    ax1.set_xlabel("Token (ID)")
-    
+    ax1.set_xlabel("Token")
+        
     # --- Subplot 2: Zipf's Law Comparison (Log-Log) ---
     for counts, label in zip(all_counts, labels):
         freqs = sorted(counts.values(), reverse=True)
@@ -160,12 +196,12 @@ if __name__ == "__main__":
         "--nsamples",
         type=int,
         default=128,
-        help="Number of samples for subsets",
+        help="Number of samples for calibration data",
     )
     parser.add_argument(
         "--pruning_types",
         nargs="+",
-        default=["random", "most_similar", "distribution_matching", "least_perplexity"],
+        default=["random", "most_similar", "distribution_matching", "least_perplexity", "zipf"],
         help="Selection methods to compare",
     )
     parser.add_argument(
@@ -240,6 +276,7 @@ if __name__ == "__main__":
         "least_perplexity": "least_perplexity",
         "herding": "herding",
         "distribution_matching": "distribution_matching",
+        "zipf": "zipf",
     }
 
     for p_type in args.pruning_types:
@@ -274,20 +311,15 @@ if __name__ == "__main__":
                 dataset_name=[args.dataset],
                 tokenizer=tokenizer,
             )
-            counts = Counter()
-            selected_texts_for_pos = []
-            for item in calib_data:
-                # Filter out padding tokens for counts
-                input_ids = item["input_ids"].tolist()
-                # Decode to get text for POS tagging
-                text = tokenizer.decode(input_ids, skip_special_tokens=True)
-                selected_texts_for_pos.append(text)
-                
-                if tokenizer.pad_token_id is not None:
-                    input_ids = [tid for tid in input_ids if tid != tokenizer.pad_token_id]
-                counts.update(input_ids)
             
-            pos_counts = get_pos_counts(selected_texts_for_pos)
+            selected_texts = []
+            for item in calib_data:
+                input_ids = item["input_ids"].tolist()
+                text = tokenizer.decode(input_ids, skip_special_tokens=True)
+                selected_texts.append(text)
+            
+            counts = get_token_counts(selected_texts, tokenizer)
+            pos_counts = get_pos_counts(selected_texts)
             all_distributions.append(counts)
             all_pos_distributions.append(pos_counts)
             labels.append(p_type)
@@ -300,3 +332,10 @@ if __name__ == "__main__":
     
     pos_output_path = os.path.join(args.output_dir, f"{args.dataset}_pos_dist.png")
     plot_pos_distribution(all_pos_distributions, labels, pos_output_path)
+
+    # 5. Calculate and print KL Divergence for tokens
+    print("\n--- KL Divergence (D_KL(Full || Subset)) for Token Distribution ---")
+    full_dist = all_distributions[0]
+    for i in range(1, len(labels)):
+        kl_val = calculate_kl(full_dist, all_distributions[i])
+        print(f"Method: {labels[i]:25} | KL Divergence: {kl_val:.6f}")

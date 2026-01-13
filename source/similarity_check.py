@@ -6,6 +6,8 @@ import os
 import torch
 import torch.nn.functional as F
 from joblib import Memory
+import collections
+from tqdm import tqdm
 
 # import wandb
 from sentence_transformers import SentenceTransformer
@@ -569,6 +571,149 @@ def herding(embeddings, n_samples):
     return torch.tensor(selected_indices)
 
 
+def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
+    """
+    Select samples from each dataset in dataloader that match its token distribution.
+    Ensures 'long' Zipf by explicitly including rare tokens first.
+    If tokenizer is provided, it normalizes tokens (lowercase, no subword markers)
+    to better count unique 'concepts' as requested.
+    """
+    calibration_data = []
+
+    for indice, dataset in enumerate(dataloader):
+        print(f"\nZipf sampling for Dataset {indice}", flush=True)
+
+        # 1. Collect all tokenized items and flatten IDs
+        all_items = []
+        for item in dataset:
+            if isinstance(item, dict):
+                all_items.append(item)
+            else:
+                all_items.append({"input_ids": item})
+
+        # 2. Global counts for target distribution
+        global_counts = collections.Counter()
+        sentence_tokens = []
+        
+        # Pre-calculate mapping if tokenizer is available for efficiency
+        id_to_norm = {}
+        if tokenizer:
+            print("Pre-calculating token normalization map...", flush=True)
+            all_unique_ids = set()
+            for item in all_items:
+                ids = item["input_ids"]
+                if isinstance(ids, torch.Tensor):
+                    ids = ids.view(-1).tolist()
+                all_unique_ids.update(ids)
+            
+            for tid in all_unique_ids:
+                if tid in tokenizer.all_special_ids:
+                    id_to_norm[tid] = None
+                    continue
+                # Decode, lowercase, and remove subword markers/whitespace
+                t_str = tokenizer.decode([tid], skip_special_tokens=True).lower().replace(' ', '').replace('Ġ', '').strip()
+                id_to_norm[tid] = t_str if t_str else None
+
+        for item in all_items:
+            ids = item["input_ids"]
+            if isinstance(ids, torch.Tensor):
+                ids = ids.view(-1).tolist()
+            
+            if tokenizer:
+                ids_to_use = [id_to_norm[tid] for tid in ids if id_to_norm.get(tid) is not None]
+            else:
+                # Filter out padding/special tokens even without a tokenizer (assume 0 is pad)
+                ids_to_use = [tid for tid in ids if tid != 0]
+                
+            global_counts.update(ids_to_use)
+            sentence_tokens.append(ids_to_use)
+
+        total_tokens = sum(global_counts.values())
+        if total_tokens == 0:
+            print(f"Warning: No tokens found for dataset {indice}")
+            continue
+            
+        target_probs = {t: c / total_tokens for t, c in global_counts.items()}
+        # Tokens sorted by rarity (ascending counts)
+        unique_tokens = sorted(global_counts.keys(), key=lambda x: global_counts[x])
+
+        # 3. Map tokens to sentences for tail coverage
+        token_to_sentences = collections.defaultdict(list)
+        for i, s_tokens in enumerate(sentence_tokens):
+            for t in set(s_tokens):
+                token_to_sentences[t].append(i)
+
+        selected_indices = []
+        selected_indices_set = set()
+        nsamples = sample_per_dataset
+
+        # Step 1: Tail coverage (the "long" part)
+        # Pick one sentence for each of the rarest tokens until we reach half budget
+        for t in unique_tokens:
+            if len(selected_indices) >= nsamples // 2:
+                break
+            candidates = token_to_sentences[t]
+            for idx in candidates:
+                if idx not in selected_indices_set:
+                    selected_indices.append(idx)
+                    selected_indices_set.add(idx)
+                    break
+
+        # Step 2: Greedy matching for the rest of the budget
+        current_counts = collections.Counter()
+        for idx in selected_indices:
+            current_counts.update(sentence_tokens[idx])
+
+        while len(selected_indices) < nsamples:
+            remaining_indices = [
+                i for i in range(len(all_items)) if i not in selected_indices_set
+            ]
+            if not remaining_indices:
+                break
+
+            total_selected_tokens = sum(current_counts.values())
+
+            # Sample a pool if candidates are many
+            pool_size = 500
+            if len(remaining_indices) > pool_size:
+                pool = np.random.choice(remaining_indices, pool_size, replace=False)
+            else:
+                pool = remaining_indices
+
+            best_idx = -1
+            best_score = -float("inf")
+
+            for idx in pool:
+                # Heuristic: score = sum_{t in s} (P_target(t) - P_current(t)) * counts_in_s(t)
+                s_tokens = sentence_tokens[idx]
+                s_counts = collections.Counter(s_tokens)
+                score = 0
+                for t, count in s_counts.items():
+                    target_p = target_probs.get(t, 0)
+                    current_p = (
+                        current_counts[t] / total_selected_tokens
+                        if total_selected_tokens > 0
+                        else 0
+                    )
+                    score += (target_p - current_p) * count
+
+                if score > best_score:
+                    best_score = score
+                    best_idx = idx
+
+            if best_idx == -1:
+                best_idx = remaining_indices[0]
+
+            selected_indices.append(best_idx)
+            selected_indices_set.add(best_idx)
+            current_counts.update(sentence_tokens[best_idx])
+
+        for i in selected_indices:
+            calibration_data.append(dataset[i])
+
+    return calibration_data
+
+
 @memory.cache(ignore=["model", "dataloader", "tokenizer"])
 def prepare_calibration(
     model,
@@ -660,6 +805,8 @@ def prepare_calibration(
             calibration_data, original_dist, sample_dist = result
         else:
             calibration_data = result
+    elif type == "zipf":
+        calibration_data = zipf_sampling(dataloader, initial_sample_per_dataset, tokenizer=tokenizer)
 
     # Coreset resampling if we have multiple datasets
     if len(dataloader) > 1 and type != "concat":

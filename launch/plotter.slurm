@@ -17,7 +17,7 @@ DATASETS=("winogrande" "gsm8k" "svamp" "boolq" "commonsense_qa" "ds1000" "race" 
 MODEL_PREF="--model"
 MODELS=(  "meta-llama/Llama-3.2-1B" "Qwen/Qwen3-1.7B" "microsoft/Phi-2" "google/gemma-2b")
 PRUNING_PREF="--pruning_type"
-PRUNING_TYPES=("most_similar" "random" "most_dissimilar" "most_similar_decoupled" "least_perplexity")
+PRUNING_TYPES=("most_similar" "random" "most_dissimilar" "most_similar_decoupled" "least_perplexity" "zipf")
 
 
 

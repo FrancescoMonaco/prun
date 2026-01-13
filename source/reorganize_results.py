@@ -47,12 +47,13 @@ def format_latex_comparison(df):
     
     return "\\begin{tabular}{l" + "r" * len(df.columns) + "}\n\\toprule\n" + header + "\n".join(rows) + "\n\\bottomrule\n\\end{tabular}"
 
-def reorganize_results(csv_path, cola_csv_path):
+def reorganize_results(csv_path, cola_csv_path, compression_type):
     if not os.path.exists(csv_path):
         print(f"Error: {csv_path} not found.")
         return
 
     df_main = pd.read_csv(csv_path)
+    df_main = df_main[df_main['pruning_type'] == compression_type]
     df_main['group'] = df_main['calibration_datasets'].apply(get_group)
     
     df_cola = pd.DataFrame()
@@ -80,21 +81,21 @@ def reorganize_results(csv_path, cola_csv_path):
                 continue
             
             # Average across calibration groups keeping tasks and pruning types separate
-            group_avg = model_ns_df.groupby(['task', 'pruning_type', 'group'])['pruned_value'].mean().reset_index()
-            final_avg = group_avg.groupby(['task', 'pruning_type'])['pruned_value'].mean().unstack()
+            group_avg = model_ns_df.groupby(['task', 'sampling', 'group'])['pruned_value'].mean().reset_index()
+            final_avg = group_avg.groupby(['task', 'sampling'])['pruned_value'].mean().unstack()
             orig_values = model_ns_df.groupby('task')['original_value'].first()
             final_avg.insert(0, 'original', orig_values)
 
             # --- COLA vs Distribution Matching Comparison ---
             comp_data = []
-            dist_match = model_ns_df[model_ns_df['pruning_type'] == 'distribution_matching']
+            dist_match = model_ns_df[model_ns_df['sampling'] == 'distribution_matching']
             if not dist_match.empty:
                 dist_avg = dist_match.groupby('task')['pruned_value'].mean()
                 for task, val in dist_avg.items():
                     comp_data.append({'task': task, 'method': 'distribution_matching', 'value': val})
             
             if not df_cola.empty:
-                cola_match = df_cola[(df_cola['model'] == model) & (df_cola['nsamples'] == nsamples) & (df_cola['pruning_type'] == 'cola')]
+                cola_match = df_cola[(df_cola['model'] == model) & (df_cola['nsamples'] == nsamples) & (df_cola['sampling'] == 'cola')]
                 if not cola_match.empty:
                     cola_avg = cola_match.groupby('task')['pruned_value'].mean()
                     for task, val in cola_avg.items():
@@ -178,4 +179,4 @@ def reorganize_results(csv_path, cola_csv_path):
             print(f"Saved summary for {model} ns={nsamples} to {filepath}")
 
 if __name__ == "__main__":
-    reorganize_results("results/experiment_results.csv", "results/cola_experiment_results.csv")
+    reorganize_results("results/experiment_results.csv", "results/cola_experiment_results.csv", "pruning")
