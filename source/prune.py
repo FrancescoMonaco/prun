@@ -86,6 +86,7 @@ if __name__ == "__main__":
             "distribution_matching",
             "distribution_matching_no_outliers",
             "zipf",
+            "unique_tokens",
         ],
         default="most_similar",
         help="Type of pruning to perform: 'most_similar', 'random', 'decoupled', 'most_dissimilar', or 'least_perplexity'",
@@ -127,7 +128,7 @@ if __name__ == "__main__":
     log.info(f"Datasets to use: {dataset_names}")
 
     sentence_trsf = SentenceTransformer("all-MiniLM-L12-v2", device="cuda")
-    #subset_size = 5000
+    # subset_size = 5000
 
     all_tokenized_data = []
 
@@ -179,7 +180,8 @@ if __name__ == "__main__":
         calibration_type = "random_sample"
     elif pruning_type == "zipf":
         calibration_type = "zipf"
-    
+    elif pruning_type == "unique_tokens":
+        calibration_type = "unique_tokens"
 
     # Pick the calibration data from the dataset
     calibration_data_dicts = prepare_calibration(

@@ -20,30 +20,34 @@ DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 logging.basicConfig(level=logging.INFO, format=FORMAT, datefmt=DATE_FORMAT)
 log = logging.getLogger(__name__)
 
+
 def get_existing_original_results(output_csv, model_name):
     if not os.path.exists(output_csv):
         return []
     try:
         df = pd.read_csv(output_csv)
-        model_df = df[df['model'] == model_name]
+        model_df = df[df["model"] == model_name]
         if model_df.empty:
             return []
-        
+
         # We want unique (task, metric, original_value)
-        subset = model_df[['task', 'metric', 'original_value']].drop_duplicates()
-        subset = subset[subset['original_value'].notnull()]
-        
+        subset = model_df[["task", "metric", "original_value"]].drop_duplicates()
+        subset = subset[subset["original_value"].notnull()]
+
         results = []
         for _, row in subset.iterrows():
-            results.append({
-                "task": row['task'],
-                "metric": row['metric'],
-                "value": row['original_value']
-            })
+            results.append(
+                {
+                    "task": row["task"],
+                    "metric": row["metric"],
+                    "value": row["original_value"],
+                }
+            )
         return results
     except Exception as e:
         log.error(f"Error reading existing results: {e}")
         return []
+
 
 def get_tokenized_data(dataset, tokenizer, dataset_name, max_length=128):
     processed_dataset = []
@@ -64,6 +68,7 @@ def get_tokenized_data(dataset, tokenizer, dataset_name, max_length=128):
         )
     return processed_dataset
 
+
 def process_results(results_dict):
     """Extracts clean metrics from lm_eval output."""
     processed = []
@@ -72,29 +77,82 @@ def process_results(results_dict):
             for metric_name, value in metrics.items():
                 # Filter out stderr and non-numeric values
                 if isinstance(value, (int, float)) and "stderr" not in metric_name:
-                    processed.append({
-                        "task": task,
-                        "metric": metric_name,
-                        "value": value
-                    })
+                    processed.append(
+                        {"task": task, "metric": metric_name, "value": value}
+                    )
     return processed
+
 
 def main():
     parser = argparse.ArgumentParser(description="Run Pruning Experiment with lm_eval")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen3-1.7B", help="Model name or path")
-    parser.add_argument("--datasets", nargs="+", default=["winogrande"], help="Datasets for calibration")
-    parser.add_argument("--eval_tasks", nargs="+", default=["boolq","rte","hellaswag","winogrande","arc_challenge","arc_easy","openbookqa"], help="Tasks for evaluation (lm_eval names)")
-    parser.add_argument("--compression_type", type=str, choices=["pruning", "quantization"], default="pruning", help="Type of compression to perform")
-    parser.add_argument("--pruning_types", nargs="+", choices=["most_similar", "random", "decoupled", "most_dissimilar", "least_perplexity", "herding", "distribution_matching", "distribution_matching_no_outliers", "zipf"], default=["zipf"], help="Types of pruning to perform")
-    parser.add_argument("--nsamples", type=int, default=128, help="Number of calibration samples")
+    parser.add_argument(
+        "--model", type=str, default="Qwen/Qwen3-1.7B", help="Model name or path"
+    )
+    parser.add_argument(
+        "--datasets", nargs="+", default=["winogrande"], help="Datasets for calibration"
+    )
+    parser.add_argument(
+        "--eval_tasks",
+        nargs="+",
+        default=[
+            "boolq",
+            "rte",
+            "hellaswag",
+            "winogrande",
+            "arc_challenge",
+            "arc_easy",
+            "openbookqa",
+        ],
+        help="Tasks for evaluation (lm_eval names)",
+    )
+    parser.add_argument(
+        "--compression_type",
+        type=str,
+        choices=["pruning", "quantization"],
+        default="pruning",
+        help="Type of compression to perform",
+    )
+    parser.add_argument(
+        "--pruning_types",
+        nargs="+",
+        choices=[
+            "most_similar",
+            "random",
+            "decoupled",
+            "most_dissimilar",
+            "least_perplexity",
+            "herding",
+            "distribution_matching",
+            "distribution_matching_no_outliers",
+            "zipf",
+            "unique_tokens",
+        ],
+        default=["unique_tokens"],
+        help="Types of pruning to perform",
+    )
+    parser.add_argument(
+        "--nsamples", type=int, default=128, help="Number of calibration samples"
+    )
     parser.add_argument("--sparsity", type=float, default=0.5, help="Pruning sparsity")
-    parser.add_argument("--output_csv", type=str, default="results/experiment_results.csv", help="Output CSV file")
-    parser.add_argument("--save_models", action="store_true", help="Save pruned models to disk")
-    parser.add_argument("--models_dir", type=str, default="models/pruned", help="Directory to save pruned models")
-    
+    parser.add_argument(
+        "--output_csv",
+        type=str,
+        default="results/experiment_results.csv",
+        help="Output CSV file",
+    )
+    parser.add_argument(
+        "--save_models", action="store_true", help="Save pruned models to disk"
+    )
+    parser.add_argument(
+        "--models_dir",
+        type=str,
+        default="models/pruned",
+        help="Directory to save pruned models",
+    )
+
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    
+
     # 1. Load tokenizer once
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -104,29 +162,45 @@ def main():
     existing_orig_metrics = get_existing_original_results(args.output_csv, args.model)
     existing_tasks = set(m["task"] for m in existing_orig_metrics)
     tasks_to_eval = [t for t in args.eval_tasks if t not in existing_tasks]
-    
+
     model = None
     if tasks_to_eval:
-        log.info(f"Loading original model {args.model} for initial evaluation of tasks: {tasks_to_eval}")
+        log.info(
+            f"Loading original model {args.model} for initial evaluation of tasks: {tasks_to_eval}"
+        )
         model = AutoModelForCausalLM.from_pretrained(
-            args.model, torch_dtype=torch.float16, device_map="auto", trust_remote_code=True
+            args.model,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            trust_remote_code=True,
         )
         log.info(f"Evaluating original model on: {tasks_to_eval}")
         orig_raw = evaluate_model(args.model, model, tokenizer, tasks_to_eval)
         new_orig_metrics = process_results(orig_raw)
-        orig_metrics = [m for m in existing_orig_metrics if m["task"] in args.eval_tasks] + new_orig_metrics
+        orig_metrics = [
+            m for m in existing_orig_metrics if m["task"] in args.eval_tasks
+        ] + new_orig_metrics
     else:
-        log.info(f"All tasks {args.eval_tasks} already have original results. Skipping initial evaluation.")
-        orig_metrics = [m for m in existing_orig_metrics if m["task"] in args.eval_tasks]
-    
+        log.info(
+            f"All tasks {args.eval_tasks} already have original results. Skipping initial evaluation."
+        )
+        orig_metrics = [
+            m for m in existing_orig_metrics if m["task"] in args.eval_tasks
+        ]
+
     # Prepare calibration data base (tokenized) once
     log.info("Preparing base tokenized data for calibration...")
     all_tokenized_data = []
     for d_name in args.datasets:
         raw_dataset = get_dataset(d_name)
-        if raw_dataset is None: continue
+        if raw_dataset is None:
+            continue
         if isinstance(raw_dataset, dict) or hasattr(raw_dataset, "keys"):
-            dataset = raw_dataset.get("train") or raw_dataset.get("test") or raw_dataset[list(raw_dataset.keys())[0]]
+            dataset = (
+                raw_dataset.get("train")
+                or raw_dataset.get("test")
+                or raw_dataset[list(raw_dataset.keys())[0]]
+            )
         else:
             dataset = raw_dataset
         tokenized_data = get_tokenized_data(dataset, tokenizer, d_name)
@@ -141,36 +215,59 @@ def main():
         "herding": "herding",
         "distribution_matching": "distribution_matching",
         "distribution_matching_no_outliers": "distribution_matching_no_outliers",
-        "zipf": "zipf"
+        "zipf": "zipf",
+        "unique_tokens": "unique_tokens",
     }
 
     # 3. Loop through pruning types
     for p_type in args.pruning_types:
-        log.info(f"\n--- Starting process for {args.compression_type} type: {p_type} ---")
-        
+        log.info(
+            f"\n--- Starting process for {args.compression_type} type: {p_type} ---"
+        )
+
         # Define save path
         safe_model_name = args.model.replace("/", "-")
         calib_name = "_".join(args.datasets)
-        save_path = os.path.join(args.models_dir, safe_model_name, args.compression_type, p_type, str(args.nsamples), str(args.sparsity), calib_name)
-        
+        save_path = os.path.join(
+            args.models_dir,
+            safe_model_name,
+            args.compression_type,
+            p_type,
+            str(args.nsamples),
+            str(args.sparsity),
+            calib_name,
+        )
+
         pruned_model = None
         if os.path.exists(os.path.join(save_path, "config.json")):
             log.info(f"Found existing compressed model at {save_path}. Loading...")
             pruned_model = AutoModelForCausalLM.from_pretrained(
-                save_path, torch_dtype=torch.float16, device_map="auto", trust_remote_code=True
+                save_path,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True,
             )
         else:
             log.info(f"No existing model found at {save_path}. Compressing...")
-            
+
             if model is None:
-                log.info(f"Loading original model {args.model} for {args.compression_type}...")
-                model = AutoModelForCausalLM.from_pretrained(
-                    args.model, torch_dtype=torch.float16, device_map="auto", trust_remote_code=True
+                log.info(
+                    f"Loading original model {args.model} for {args.compression_type}..."
                 )
-            
+                model = AutoModelForCausalLM.from_pretrained(
+                    args.model,
+                    torch_dtype=torch.float16,
+                    device_map="auto",
+                    trust_remote_code=True,
+                )
+
             # Prepare calibration for this specific type
-            calib_model = model if p_type == "least_perplexity" else SentenceTransformer("all-MiniLM-L12-v2", device=device)
-            
+            calib_model = (
+                model
+                if p_type == "least_perplexity"
+                else SentenceTransformer("all-MiniLM-L12-v2", device=device)
+            )
+
             calibration_data_dicts = prepare_calibration(
                 model=calib_model,
                 dataloader=[all_tokenized_data],
@@ -181,64 +278,86 @@ def main():
                 dataset_name=calib_name,
                 tokenizer=tokenizer,
             )
-            
-            data_list = [{"input_ids": item["input_ids"].cpu().tolist(), 
-                          "attention_mask": item["attention_mask"].cpu().tolist()} 
-                         for item in calibration_data_dicts]
+
+            data_list = [
+                {
+                    "input_ids": item["input_ids"].cpu().tolist(),
+                    "attention_mask": item["attention_mask"].cpu().tolist(),
+                }
+                for item in calibration_data_dicts
+            ]
             calibration_dataset = Dataset.from_list(data_list)
 
             # Compress
             if args.compression_type == "pruning":
                 log.info(f"Pruning model with sparsity {args.sparsity}...")
-                recipe = WandaPruningModifier(sparsity=args.sparsity, mask_structure="0:0", targets="__ALL__")
+                recipe = WandaPruningModifier(
+                    sparsity=args.sparsity, mask_structure="0:0", targets="__ALL__"
+                )
             else:
-                log.info(f"Quantizing model with GPTQ...")
+                log.info("Quantizing model with GPTQ...")
                 recipe = GPTQModifier(targets="Linear", scheme="W4A16")
-            
+
             oneshot(model=model, dataset=calibration_dataset, recipe=recipe)
             log.info("Compression complete.")
-            
+
             # if args.save_models:
             #     log.info(f"Saving pruned model to {save_path}...")
             #     os.makedirs(save_path, exist_ok=True)
             #     model.save_pretrained(save_path)
             #     tokenizer.save_pretrained(save_path)
-            
+
             pruned_model = model
 
         # 4. Evaluate pruned model
         log.info(f"Evaluating compressed model ({p_type})...")
-        pruned_raw = evaluate_model(args.model, pruned_model, tokenizer, args.eval_tasks)
+        pruned_raw = evaluate_model(
+            args.model, pruned_model, tokenizer, args.eval_tasks
+        )
         pruned_metrics = process_results(pruned_raw)
 
         # 5. Save results to CSV
         log.info(f"Saving results for {p_type} to {args.output_csv}...")
         rows = []
         for orig in orig_metrics:
-            pruned_val = next((p["value"] for p in pruned_metrics if p["task"] == orig["task"] and p["metric"] == orig["metric"]), None)
-            rows.append({
-                "model": args.model,
-                "task": orig["task"],
-                "metric": orig["metric"],
-                "original_value": orig["value"],
-                "pruned_value": pruned_val,
-                "compression_type": args.compression_type,
-                "pruning_type": p_type,
-                "nsamples": args.nsamples,
-                "sparsity": args.sparsity,
-                "calibration_datasets": calib_name
-            })
+            pruned_val = next(
+                (
+                    p["value"]
+                    for p in pruned_metrics
+                    if p["task"] == orig["task"] and p["metric"] == orig["metric"]
+                ),
+                None,
+            )
+            rows.append(
+                {
+                    "model": args.model,
+                    "task": orig["task"],
+                    "metric": orig["metric"],
+                    "original_value": orig["value"],
+                    "pruned_value": pruned_val,
+                    "compression_type": args.compression_type,
+                    "pruning_type": p_type,
+                    "nsamples": args.nsamples,
+                    "sparsity": args.sparsity,
+                    "calibration_datasets": calib_name,
+                }
+            )
 
         df = pd.DataFrame(rows)
         os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
-        
+
         # Use a lock file to prevent race conditions when multiple scripts write to the same CSV
         lock_path = args.output_csv + ".lock"
         lock = FileLock(lock_path)
-        
+
         with lock:
-            df.to_csv(args.output_csv, mode='a', header=not os.path.exists(args.output_csv), index=False)
-        
+            df.to_csv(
+                args.output_csv,
+                mode="a",
+                header=not os.path.exists(args.output_csv),
+                index=False,
+            )
+
         # If we are going to the next p_type, we MUST reload the original model
         # because 'model' (which is 'pruned_model') is now modified.
         if p_type != args.pruning_types[-1]:
@@ -248,10 +367,14 @@ def main():
             del pruned_model
             torch.cuda.empty_cache()
             model = AutoModelForCausalLM.from_pretrained(
-                args.model, torch_dtype=torch.float16, device_map="auto", trust_remote_code=True
+                args.model,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True,
             )
 
     log.info("All experiments finished successfully.")
+
 
 if __name__ == "__main__":
     main()

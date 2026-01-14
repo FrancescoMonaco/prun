@@ -195,13 +195,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--nsamples",
         type=int,
-        default=128,
+        default=512,
         help="Number of samples for calibration data",
     )
     parser.add_argument(
         "--pruning_types",
         nargs="+",
-        default=["random", "most_similar", "distribution_matching", "least_perplexity", "zipf"],
+        default=["random", "most_similar", "distribution_matching", "least_perplexity", "zipf", "unique_tokens"],
         help="Selection methods to compare",
     )
     parser.add_argument(
@@ -277,6 +277,7 @@ if __name__ == "__main__":
         "herding": "herding",
         "distribution_matching": "distribution_matching",
         "zipf": "zipf",
+        "unique_tokens": "unique_tokens",
     }
 
     for p_type in args.pruning_types:

@@ -201,9 +201,7 @@ def use_embedding_for_sampling(
             N = len(sorted_indices_all)
             start_idx = int(0.05 * N)
             end_idx = int(0.95 * N)
-            idx_indices = torch.linspace(
-                start_idx, end_idx, sample_per_dataset
-            ).long()
+            idx_indices = torch.linspace(start_idx, end_idx, sample_per_dataset).long()
             sorted_indices = sorted_indices_all[idx_indices]
         elif type == "herding":
             # Flatten embeddings if needed
@@ -510,7 +508,6 @@ def k_center_greedy(embeddings, n_samples):
 
     device = embeddings.device
     embeddings = embeddings.to(device)
-    N = embeddings.shape[0]
 
     selected_indices = [0]
     # Use squared Euclidean distance for efficiency
@@ -594,7 +591,7 @@ def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
         # 2. Global counts for target distribution
         global_counts = collections.Counter()
         sentence_tokens = []
-        
+
         # Pre-calculate mapping if tokenizer is available for efficiency
         id_to_norm = {}
         if tokenizer:
@@ -605,26 +602,34 @@ def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
                 if isinstance(ids, torch.Tensor):
                     ids = ids.view(-1).tolist()
                 all_unique_ids.update(ids)
-            
+
             for tid in all_unique_ids:
                 if tid in tokenizer.all_special_ids:
                     id_to_norm[tid] = None
                     continue
                 # Decode, lowercase, and remove subword markers/whitespace
-                t_str = tokenizer.decode([tid], skip_special_tokens=True).lower().replace(' ', '').replace('Ġ', '').strip()
+                t_str = (
+                    tokenizer.decode([tid], skip_special_tokens=True)
+                    .lower()
+                    .replace(" ", "")
+                    .replace("Ġ", "")
+                    .strip()
+                )
                 id_to_norm[tid] = t_str if t_str else None
 
         for item in all_items:
             ids = item["input_ids"]
             if isinstance(ids, torch.Tensor):
                 ids = ids.view(-1).tolist()
-            
+
             if tokenizer:
-                ids_to_use = [id_to_norm[tid] for tid in ids if id_to_norm.get(tid) is not None]
+                ids_to_use = [
+                    id_to_norm[tid] for tid in ids if id_to_norm.get(tid) is not None
+                ]
             else:
                 # Filter out padding/special tokens even without a tokenizer (assume 0 is pad)
                 ids_to_use = [tid for tid in ids if tid != 0]
-                
+
             global_counts.update(ids_to_use)
             sentence_tokens.append(ids_to_use)
 
@@ -632,7 +637,7 @@ def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
         if total_tokens == 0:
             print(f"Warning: No tokens found for dataset {indice}")
             continue
-            
+
         target_probs = {t: c / total_tokens for t, c in global_counts.items()}
         # Tokens sorted by rarity (ascending counts)
         unique_tokens = sorted(global_counts.keys(), key=lambda x: global_counts[x])
@@ -707,6 +712,116 @@ def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
             selected_indices.append(best_idx)
             selected_indices_set.add(best_idx)
             current_counts.update(sentence_tokens[best_idx])
+
+        for i in selected_indices:
+            calibration_data.append(dataset[i])
+
+    return calibration_data
+
+
+def unique_tokens_sampling(dataloader, sample_per_dataset, tokenizer=None):
+    """
+    Select samples from each dataset that maximize the total number of unique tokens.
+    Tokens are normalized (lowercase, no subword markers) to count concepts.
+    """
+    calibration_data = []
+
+    for indice, dataset in enumerate(dataloader):
+        print(f"\nUnique tokens sampling for Dataset {indice}", flush=True)
+
+        all_items = []
+        for item in dataset:
+            if isinstance(item, dict):
+                all_items.append(item)
+            else:
+                all_items.append({"input_ids": item})
+
+        # 1. Pre-calculate normalization map
+        id_to_norm = {}
+        if tokenizer:
+            print("Pre-calculating token normalization map...", flush=True)
+            all_unique_ids = set()
+            for item in all_items:
+                ids = item["input_ids"]
+                if isinstance(ids, torch.Tensor):
+                    ids = ids.view(-1).tolist()
+                all_unique_ids.update(ids)
+
+            for tid in all_unique_ids:
+                if tid in tokenizer.all_special_ids:
+                    id_to_norm[tid] = None
+                    continue
+                t_str = (
+                    tokenizer.decode([tid], skip_special_tokens=True)
+                    .lower()
+                    .replace(" ", "")
+                    .replace("Ġ", "")
+                    .strip()
+                )
+                id_to_norm[tid] = t_str if t_str else None
+
+        # 2. Extract unique normalized concepts for each sentence
+        sentence_concepts = []
+        for item in all_items:
+            ids = item["input_ids"]
+            if isinstance(ids, torch.Tensor):
+                ids = ids.view(-1).tolist()
+
+            if tokenizer:
+                concepts = {
+                    id_to_norm[tid] for tid in ids if id_to_norm.get(tid) is not None
+                }
+            else:
+                concepts = {tid for tid in ids if tid != 0}
+            sentence_concepts.append(concepts)
+
+        # 3. Greedy selection to maximize coverage
+        selected_indices = []
+        selected_indices_set = set()
+        covered_concepts = set()
+        nsamples = sample_per_dataset
+
+        pbar = tqdm(total=nsamples, desc="Selecting samples")
+        while len(selected_indices) < nsamples:
+            best_idx = -1
+            max_new = -1
+
+            # Search for the sentence adding most new concepts
+            # If candidates are too many, we can use a sample for speed, but let's try full search first
+            # unless it's extremely slow.
+
+            # Optimization: only consider items not yet selected
+            eligible_indices = [
+                i for i in range(len(all_items)) if i not in selected_indices_set
+            ]
+            if not eligible_indices:
+                break
+
+            # If the dataset is very large, subsample the search pool to speed up
+            search_pool = eligible_indices
+            if len(eligible_indices) > 2000:
+                # Still try to be smart: include some long sentences or just random
+                search_pool = np.random.choice(eligible_indices, 2000, replace=False)
+
+            for idx in search_pool:
+                new_concepts = sentence_concepts[idx] - covered_concepts
+                count = len(new_concepts)
+                if count > max_new:
+                    max_new = count
+                    best_idx = idx
+                elif count == max_new and best_idx != -1:
+                    # Tie-break: pick the one with more total concepts
+                    if len(sentence_concepts[idx]) > len(sentence_concepts[best_idx]):
+                        best_idx = idx
+
+            if best_idx == -1:
+                break
+
+            selected_indices.append(best_idx)
+            selected_indices_set.add(best_idx)
+            covered_concepts.update(sentence_concepts[best_idx])
+            pbar.update(1)
+        pbar.close()
 
         for i in selected_indices:
             calibration_data.append(dataset[i])
@@ -806,13 +921,20 @@ def prepare_calibration(
         else:
             calibration_data = result
     elif type == "zipf":
-        calibration_data = zipf_sampling(dataloader, initial_sample_per_dataset, tokenizer=tokenizer)
+        calibration_data = zipf_sampling(
+            dataloader, initial_sample_per_dataset, tokenizer=tokenizer
+        )
+    elif type == "unique_tokens":
+        calibration_data = unique_tokens_sampling(
+            dataloader, initial_sample_per_dataset, tokenizer=tokenizer
+        )
 
     # Coreset resampling if we have multiple datasets
     if len(dataloader) > 1 and type != "concat":
         coreset_method = (
             "Herding"
-            if type in ["herding", "distribution_matching", "distribution_matching_no_outliers"]
+            if type
+            in ["herding", "distribution_matching", "distribution_matching_no_outliers"]
             else "K-Center Greedy"
         )
         print(
@@ -833,7 +955,11 @@ def prepare_calibration(
         if pool_embeddings.dim() == 3:
             pool_embeddings = torch.mean(pool_embeddings, dim=1)
 
-        if type in ["herding", "distribution_matching", "distribution_matching_no_outliers"]:
+        if type in [
+            "herding",
+            "distribution_matching",
+            "distribution_matching_no_outliers",
+        ]:
             selected_indices = herding(pool_embeddings, nsamples)
         else:
             selected_indices = k_center_greedy(pool_embeddings, nsamples)

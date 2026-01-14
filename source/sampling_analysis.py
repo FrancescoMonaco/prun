@@ -2,12 +2,11 @@ from prune import get_tokenized_data
 from similarity_check import prepare_calibration, embedd_data
 from scipy.stats import wasserstein_distance
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from sentence_transformers import SentenceTransformer
 import torch
-import numpy as np
 import torch.nn.functional as F
 
 from data import get_dataset
+
 
 def compute_coverage_metrics(original_embeddings, sample_embeddings):
     """
@@ -16,45 +15,54 @@ def compute_coverage_metrics(original_embeddings, sample_embeddings):
     """
     N = original_embeddings.shape[0]
     M = sample_embeddings.shape[0]
-    
+
     # Flatten if 3D (batch, seq_len, embed_dim)
     if original_embeddings.dim() == 3:
         original_embeddings = original_embeddings.view(N, -1)
     if sample_embeddings.dim() == 3:
         sample_embeddings = sample_embeddings.view(M, -1)
-        
+
     # Normalize sample embeddings once
-    sample_norm = F.normalize(sample_embeddings.to(torch.float32), p=2, dim=-1).to("cuda")
-    
+    sample_norm = F.normalize(sample_embeddings.to(torch.float32), p=2, dim=-1).to(
+        "cuda"
+    )
+
     min_dists = []
     batch_size = 100
     for i in range(0, N, batch_size):
-        batch = original_embeddings[i:i+batch_size].to(torch.float32).to("cuda")
+        batch = original_embeddings[i : i + batch_size].to(torch.float32).to("cuda")
         batch_norm = F.normalize(batch, p=2, dim=-1)
-        
+
         # Cosine similarity (batch_size, M)
         cos_sim = torch.matmul(batch_norm, sample_norm.t())
         # Cosine distance = 1 - similarity
         cos_dist = 1 - cos_sim
-        
+
         min_dist, _ = torch.min(cos_dist, dim=1)
         min_dists.append(min_dist.cpu())
-        
+
     min_dists = torch.cat(min_dists)
-    
+
     mnnd = torch.mean(min_dists).item()
     maxnnd = torch.max(min_dists).item()
-    
+
     # Centroid distance
-    orig_centroid = torch.mean(original_embeddings.to(torch.float32), dim=0, keepdim=True)
-    sample_centroid = torch.mean(sample_embeddings.to(torch.float32), dim=0, keepdim=True)
-    
+    orig_centroid = torch.mean(
+        original_embeddings.to(torch.float32), dim=0, keepdim=True
+    )
+    sample_centroid = torch.mean(
+        sample_embeddings.to(torch.float32), dim=0, keepdim=True
+    )
+
     orig_centroid_norm = F.normalize(orig_centroid, p=2, dim=-1).to("cuda")
     sample_centroid_norm = F.normalize(sample_centroid, p=2, dim=-1).to("cuda")
-    
-    centroid_dist = (1 - F.cosine_similarity(orig_centroid_norm, sample_centroid_norm)).item()
-    
+
+    centroid_dist = (
+        1 - F.cosine_similarity(orig_centroid_norm, sample_centroid_norm)
+    ).item()
+
     return mnnd, maxnnd, centroid_dist
+
 
 if __name__ == "__main__":
     datasets = ["winogrande", "svamp", "boolq", "commonsense_qa", "race"]
@@ -69,9 +77,7 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
     with open("results/sampling_analysis.csv", "a+") as f:
-        f.write(
-            "dataset,pruning_type,wasserstein,mnnd,maxnnd,centroid_dist\n"
-        )
+        f.write("dataset,pruning_type,wasserstein,mnnd,maxnnd,centroid_dist\n")
 
         for dataset_name in datasets:
             # f.write(f"{dataset_name},") # Removed this as we write per pruning type now
@@ -97,13 +103,13 @@ if __name__ == "__main__":
             original_embeddings_model = embedd_data(
                 tokenized_data, model, device="cuda"
             )
-            
+
             # original_sentence_embeddings = embedd_data(
             #     tokenized_data,
             #     SentenceTransformer(sentence_transformer_model_name, device="cuda"),
             #     device="cuda",
             # )
-            
+
             original_dists = (
                 torch.norm(original_embeddings_model, dim=-1)
                 .view(-1)
@@ -121,6 +127,7 @@ if __name__ == "__main__":
                 "herding",
                 "distribution_matching",
                 "zipf",
+                "unique_tokens",
             ]:
                 # Map pruning_type to prepare_calibration type
                 calibration_type = "prototype"
@@ -140,6 +147,8 @@ if __name__ == "__main__":
                     calibration_type = "distribution_matching"
                 elif pruning_type == "zipf":
                     calibration_type = "zipf"
+                elif pruning_type == "unique_tokens":
+                    calibration_type = "unique_tokens"
 
                 # Prepare the calibration sample
                 calibration = prepare_calibration(
@@ -157,23 +166,27 @@ if __name__ == "__main__":
 
                 # Compute sample distribution
                 sample_embeddings = embedd_data(calibration, model, device="cuda")
-                
+
                 # Compare the distribution of the sample and the original dataset (Wasserstein on norms)
                 sample_dists = (
                     torch.norm(sample_embeddings, dim=-1).view(-1).cpu().float().numpy()
                 )
                 w_distance = wasserstein_distance(original_dists, sample_dists)
-                
-                # Compute coverage metrics
-                mnnd, maxnnd, c_dist = compute_coverage_metrics(original_embeddings_model, sample_embeddings)
 
-                f.write(f"{dataset_name},{pruning_type},{w_distance},{mnnd},{maxnnd},{c_dist}\n")
+                # Compute coverage metrics
+                mnnd, maxnnd, c_dist = compute_coverage_metrics(
+                    original_embeddings_model, sample_embeddings
+                )
+
+                f.write(
+                    f"{dataset_name},{pruning_type},{w_distance},{mnnd},{maxnnd},{c_dist}\n"
+                )
                 f.flush()
             # Removed f.write("\n") as we write per line now
 
         for dataset_group in multiple_datasets:
             dataset_names = dataset_group
-            group_name = '_'.join(dataset_names)
+            group_name = "_".join(dataset_names)
             combined_tokenized_data = []
             for dataset_name in dataset_names:
                 raw_dataset = get_dataset(dataset_name)
@@ -201,7 +214,7 @@ if __name__ == "__main__":
             original_embeddings = embedd_data(
                 combined_tokenized_data, model, device="cuda"
             )
-            
+
             original_dists = (
                 torch.norm(original_embeddings, dim=-1).view(-1).cpu().float().numpy()
             )
@@ -215,6 +228,7 @@ if __name__ == "__main__":
                 "herding",
                 "distribution_matching",
                 "zipf",
+                "unique_tokens",
             ]:
                 # Map pruning_type to prepare_calibration type
                 calibration_type = "prototype"
@@ -234,6 +248,8 @@ if __name__ == "__main__":
                     calibration_type = "distribution_matching"
                 elif pruning_type == "zipf":
                     calibration_type = "zipf"
+                elif pruning_type == "unique_tokens":
+                    calibration_type = "unique_tokens"
 
                 # Prepare the calibration sample
                 calibration = prepare_calibration(
@@ -250,15 +266,19 @@ if __name__ == "__main__":
                 )
                 # Compute sample distribution
                 sample_embeddings = embedd_data(calibration, model, device="cuda")
-                
+
                 # Compare the distribution of the sample and the original dataset (Wasserstein on norms)
                 sample_dists = (
                     torch.norm(sample_embeddings, dim=-1).view(-1).cpu().float().numpy()
                 )
                 w_distance = wasserstein_distance(original_dists, sample_dists)
-                
-                # Compute coverage metrics
-                mnnd, maxnnd, c_dist = compute_coverage_metrics(original_embeddings, sample_embeddings)
 
-                f.write(f"{group_name},{pruning_type},{w_distance},{mnnd},{maxnnd},{c_dist}\n")
+                # Compute coverage metrics
+                mnnd, maxnnd, c_dist = compute_coverage_metrics(
+                    original_embeddings, sample_embeddings
+                )
+
+                f.write(
+                    f"{group_name},{pruning_type},{w_distance},{mnnd},{maxnnd},{c_dist}\n"
+                )
                 f.flush()
