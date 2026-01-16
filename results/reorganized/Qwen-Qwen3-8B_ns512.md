@@ -11,6 +11,7 @@
 | openbookqa    |     0.31   | 0.3640      | **0.3695**              | 0.3670                              | 0.3690     | 0.3650            | 0.3650         | **0.3695** |          0.315  | **0.3693** |
 | rte           |     0.7834 | 0.7599      | **0.7635**              | 0.7581                              | **0.7653** | 0.7617            | 0.7617         | **0.7653** |          0.6715 | 0.7605     |
 | winogrande    |     0.6772 | 0.6230      | **0.6851**              | **0.6855**                          | **0.6914** | 0.6239            | 0.6235         | 0.6270     |          0.6256 | 0.6848     |
+| Mean          |     0.6574 | 0.6260      | 0.6727                  | 0.6716                              | 0.6729     | 0.6273            | 0.6265         | 0.6282     |          0.5615 | 0.6727     |
 
 ## LaTeX Table
 
@@ -19,15 +20,16 @@ Note: Requires `\usepackage[table]{xcolor}` in your LaTeX preamble.
 ```latex
 \begin{tabular}{lrrrrrrrrrr}
 \toprule
- & original & decoupled & distribution_matching & distribution_matching_no_outliers & herding & most_dissimilar & most_similar & random & unique_tokens & zipf \\
+ & original & decoupled & distribution_matching & distribution_matching_no_outliers & herding & most_dissimilar & most_similar & random & unique_tokens & zipf \
 \midrule
-arc_challenge & 0.5580 & 0.4177 & \cellcolor{green!10} 0.5574 & \cellcolor{green!40} 0.5589 & 0.5552 & 0.4194 & 0.4157 & 0.4181 & 0.4423 & \cellcolor{green!25} 0.5586 \\
-arc_easy & 0.8359 & \cellcolor{green!10} 0.8192 & 0.8165 & 0.8142 & 0.8145 & \cellcolor{green!40} 0.8195 & \cellcolor{green!25} 0.8195 & 0.8148 & 0.6472 & 0.8167 \\
-boolq & 0.8661 & 0.7486 & \cellcolor{green!10} 0.8647 & 0.8641 & \cellcolor{green!25} 0.8654 & 0.7512 & 0.7497 & 0.7498 & 0.7033 & \cellcolor{green!40} 0.8655 \\
-hellaswag & 0.5713 & 0.6493 & 0.6526 & \cellcolor{green!25} 0.6532 & 0.6497 & 0.6502 & 0.6502 & \cellcolor{green!10} 0.6526 & 0.5260 & \cellcolor{green!40} 0.6537 \\
-openbookqa & 0.3100 & 0.3640 & \cellcolor{green!40} 0.3695 & 0.3670 & 0.3690 & 0.3650 & 0.3650 & \cellcolor{green!25} 0.3695 & 0.3150 & \cellcolor{green!10} 0.3693 \\
-rte & 0.7834 & 0.7599 & \cellcolor{green!10} 0.7635 & 0.7581 & \cellcolor{green!40} 0.7653 & 0.7617 & 0.7617 & \cellcolor{green!25} 0.7653 & 0.6715 & 0.7605 \\
-winogrande & 0.6772 & 0.6230 & \cellcolor{green!10} 0.6851 & \cellcolor{green!25} 0.6855 & \cellcolor{green!40} 0.6914 & 0.6239 & 0.6235 & 0.6270 & 0.6256 & 0.6848 \\
+arc_challenge & 0.5580 & 0.4177 & \cellcolor{green!10} 0.5574 & \cellcolor{green!40} 0.5589 & 0.5552 & 0.4194 & 0.4157 & 0.4181 & 0.4423 & \cellcolor{green!25} 0.5586 \"
+arc_easy & 0.8359 & \cellcolor{green!10} 0.8192 & 0.8165 & 0.8142 & 0.8145 & \cellcolor{green!40} 0.8195 & \cellcolor{green!25} 0.8195 & 0.8148 & 0.6472 & 0.8167 \"
+boolq & 0.8661 & 0.7486 & \cellcolor{green!10} 0.8647 & 0.8641 & \cellcolor{green!25} 0.8654 & 0.7512 & 0.7497 & 0.7498 & 0.7033 & \cellcolor{green!40} 0.8655 \"
+hellaswag & 0.5713 & 0.6493 & 0.6526 & \cellcolor{green!25} 0.6532 & 0.6497 & 0.6502 & 0.6502 & \cellcolor{green!10} 0.6526 & 0.5260 & \cellcolor{green!40} 0.6537 \"
+openbookqa & 0.3100 & 0.3640 & \cellcolor{green!40} 0.3695 & 0.3670 & 0.3690 & 0.3650 & 0.3650 & \cellcolor{green!25} 0.3695 & 0.3150 & \cellcolor{green!10} 0.3693 \"
+rte & 0.7834 & 0.7599 & \cellcolor{green!10} 0.7635 & 0.7581 & \cellcolor{green!40} 0.7653 & 0.7617 & 0.7617 & \cellcolor{green!25} 0.7653 & 0.6715 & 0.7605 \"
+winogrande & 0.6772 & 0.6230 & \cellcolor{green!10} 0.6851 & \cellcolor{green!25} 0.6855 & \cellcolor{green!40} 0.6914 & 0.6239 & 0.6235 & 0.6270 & 0.6256 & 0.6848 \"
+Mean & 0.6574 & 0.6260 & 0.6727 & 0.6716 & 0.6729 & 0.6273 & 0.6265 & 0.6282 & 0.5615 & 0.6727 \"
 \bottomrule
 \end{tabular}
 ```

@@ -133,6 +133,7 @@ def reorganize_results(csv_path, cola_csv_path, compression_type):
                 comparison_df.insert(0, "original", orig_values)
                 comparison_df = comparison_df.dropna()
 
+
             # Prepare Markdown version with bolding for top 3
             md_avg = final_avg.copy().astype(str)
             for task, row in final_avg.iterrows():
@@ -148,9 +149,21 @@ def reorganize_results(csv_path, cola_csv_path, compression_type):
                     else:
                         md_avg.at[task, col] = f"{val:.4f}"
 
+            # Calcola la media per ogni colonna e aggiungi la riga 'Mean'
+            mean_row = final_avg.mean(axis=0, skipna=True)
+            mean_row_str = {}
+            for col in final_avg.columns:
+                val = mean_row[col]
+                if pd.isna(val):
+                    mean_row_str[col] = "nan"
+                else:
+                    mean_row_str[col] = f"{val:.4f}"
+            md_avg.loc["Mean"] = mean_row_str
+
             # Prepare LaTeX version with highlighting
+
             def format_latex_table(df):
-                header = " & " + " & ".join(df.columns) + " \\\\\n\\midrule\n"
+                header = " & " + " & ".join(df.columns) + " \\\n\\midrule\n"
                 rows = []
                 for task, row in df.iterrows():
                     cols_to_check = [c for c in df.columns if c != "original"]
@@ -169,8 +182,20 @@ def reorganize_results(csv_path, cola_csv_path, compression_type):
                             row_str += f" & \\cellcolor{{{color}}} {val:.4f}"
                         else:
                             row_str += f" & {val:.4f}"
-                    row_str += " \\\\"
+                    row_str += " \\\""
                     rows.append(row_str)
+
+                # Aggiungi la riga della media
+                mean_row = df.mean(axis=0, skipna=True)
+                mean_str = "Mean"
+                for col in df.columns:
+                    val = mean_row[col]
+                    if pd.isna(val):
+                        mean_str += " & nan"
+                    else:
+                        mean_str += f" & {val:.4f}"
+                mean_str += " \\\""
+                rows.append(mean_str)
 
                 return (
                     "\\begin{tabular}{l"

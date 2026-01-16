@@ -854,6 +854,8 @@ def prepare_calibration(
 
     original_dist = None
     sample_dist = None
+    if type == "most_similar": 
+        type = "prototype"  # alias
 
     if type == "concat":
         calibration_data = torch.utils.data.ConcatDataset(dataloader)

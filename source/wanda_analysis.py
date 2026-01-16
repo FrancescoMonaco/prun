@@ -32,9 +32,12 @@ class WandaAnalysis:
         self.wanda_mean = {}
         self.wanda_var = {}
 
-        # Store actiations
+        # Store activations
         self.activations_mean = {}
         self.activations_var = {}
+
+        # Store results for different techniques
+        self.results_by_technique = {}
 
         # Module -> qualified name lookup for better reporting
         self._module_names = {}
@@ -71,44 +74,46 @@ class WandaAnalysis:
             x = x.unsqueeze(1)
 
         B, S, H = x.shape
-        x = x.cpu().to(dtype=torch.float64)
+        # Move to CPU float for numerical stability, but keep float32 to save RAM
+        x = x.detach().cpu().to(dtype=torch.float32)
 
-        # Collapse only token dimension when computing aggregate norms
+        # Collapse only token dimension when computing aggregate stats
         flat = x.reshape(B * S, H)
-        batch_sum_sq = (flat**2).sum(dim=0)  # (H,)
+
+        # --- Collect stats for mean and variance ---
+        # Avoid creating multiple copies, use precise accumulation
+        sum_x = flat.sum(dim=0, dtype=torch.float64)
+        sum_sq = (flat**2).sum(dim=0, dtype=torch.float64)
+        num_tokens = B * S
 
         # Per-sample feature norms (||X_j||_2) for mean/std statistics
-        sample_sq = (x**2).sum(dim=1)  # (B, H), sum over sequence len
+        sample_sq = (x.to(dtype=torch.float64)**2).sum(dim=1)  # (B, H), sum over sequence len
         sample_l2 = torch.sqrt(sample_sq + 1e-12)
-
-        # --- Collect mean and variance of activations ---
-        activ_mean = flat.mean(dim=0)  # (H,)
-        activ_var = flat.var(dim=0, unbiased=False)  # (H,)
-        if not hasattr(self, "_activ_samples"):
-            self._activ_samples = {}
-        if module not in self.activations_mean:
-            self.activations_mean[module] = activ_mean.clone()
-            self.activations_var[module] = activ_var.clone()
-            self._activ_samples[module] = 1
-        else:
-            self.activations_mean[module] += activ_mean
-            self.activations_var[module] += activ_var
-            self._activ_samples[module] += 1
 
         stats = self._module_stats.get(module)
         if stats is None:
-            zeros = torch.zeros(H, dtype=torch.float64)
             stats = {
-                "sum_sq": zeros.clone(),  # aggregate \sum x^2 for Eq. (1)
-                "sum_l2": zeros.clone(),  # accumulate ||X_j|| across samples
-                "sum_l2_sq": zeros.clone(),  # accumulate ||X_j||^2 across samples
-                "samples": 0,
+                "sum_x": sum_x,
+                "sum_sq": sum_sq,  # aggregate \sum x^2 for Eq. (1)
+                "sum_l2": sample_l2.sum(dim=0),  # accumulate ||X_j|| across samples
+                "sum_l2_sq": (sample_l2**2).sum(dim=0),  # accumulate ||X_j||^2 across samples
+                "samples": B,
+                "total_tokens": num_tokens,
             }
             self._module_stats[module] = stats
-        stats["sum_sq"] += batch_sum_sq
-        stats["sum_l2"] += sample_l2.sum(dim=0)
-        stats["sum_l2_sq"] += (sample_l2**2).sum(dim=0)
-        stats["samples"] += B
+        else:
+            stats["sum_x"] += sum_x
+            stats["sum_sq"] += sum_sq
+            stats["sum_l2"] += sample_l2.sum(dim=0)
+            stats["sum_l2_sq"] += (sample_l2**2).sum(dim=0)
+            stats["samples"] += B
+            stats["total_tokens"] += num_tokens
+
+        # Explicitly delete temporary tensors to help GC
+        del flat
+        del x
+        del sample_sq
+        del sample_l2
 
     @staticmethod
     def _get_weight(module):
@@ -120,14 +125,33 @@ class WandaAnalysis:
 
     def compute_activations_stats(self):
         """Calcola la media e la varianza finali delle attivazioni per ogni modulo."""
-        for module in self.activations_mean:
-            n = self._activ_samples[module]
-            self.activations_mean[module] = (
-                (self.activations_mean[module] / n).cpu().numpy()
-            )
-            self.activations_var[module] = (
-                (self.activations_var[module] / n).cpu().numpy()
-            )
+        for module, stats in self._module_stats.items():
+            N = max(stats["total_tokens"], 1)
+            mean = stats["sum_x"] / N
+            sq_mean = stats["sum_sq"] / N
+            var = torch.clamp(sq_mean - mean**2, min=0.0)
+
+            self.activations_mean[module] = mean.cpu().numpy()
+            self.activations_var[module] = var.cpu().numpy()
+
+    def clear_stats(self):
+        """Resets the accumulated statistics for the next collection."""
+        self._module_stats = {}
+        self.wanda_mean = {}
+        self.wanda_var = {}
+        self.activations_mean = {}
+        self.activations_var = {}
+        if hasattr(self, "_activ_samples"):
+            self._activ_samples = {}
+
+    def store_results(self, technique_name):
+        """Stores the current computed stats under a technique name."""
+        self.results_by_technique[technique_name] = {
+            "activations_mean": {m: v.copy() for m, v in self.activations_mean.items()},
+            "activations_var": {m: v.copy() for m, v in self.activations_var.items()},
+            "feature_norm": {m: torch.sqrt(s["sum_sq"] + 1e-12).cpu().numpy() for m, s in self._module_stats.items()},
+        }
+        self.clear_stats()
 
     # ------------------------------
     # Public API
@@ -166,62 +190,199 @@ class WandaAnalysis:
             self.wanda_var[module] = wanda_var.numpy()
 
     def plot(self, save_path="wanda_analysis.pdf", max_layers=None):
-        """Creates a PDF with Wanda heatmaps."""
+        """Creates a PDF with Wanda heatmaps and saves stats to CSV."""
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         modules = list(self.wanda_mean.keys())
         if max_layers is not None:
             modules = modules[:max_layers]
 
         rows = len(modules)
-        fig, axes = plt.subplots(rows, 2, figsize=(14, 4 * rows), layout="constrained")
+        fig, axes = plt.subplots(rows, 2, figsize=(16, 5 * rows), layout="constrained")
         if rows == 1:
-            axes = np.array([axes])
+            axes = np.expand_dims(axes, 0)
 
-        with open(save_path.replace(".pdf", ".txt"), "w") as f:
+        csv_path = save_path.replace(".pdf", ".csv")
+        with open(csv_path, "w") as f:
             f.write(
                 "pruning_type,layer,wanda_max,wanda_mean,wanda_min,wanda_median,activations_max,activations_mean,activations_min,activations_median,activations_var\n"
             )
             for i, module in enumerate(modules):
                 mean_map = self.wanda_mean[module]
-                # var_map = self.wanda_var[module]
                 mean_activ = self.activations_mean[module]
-                # var_activ = self.activations_var[module]
                 name = self._module_names.get(module, module.__class__.__name__)
 
-                # ax1 = axes[i, 0]
-                # im1 = ax1.imshow(
-                #     mean_map,
-                #     aspect="auto",
-                #     cmap="viridis",
-                #     vmin=0.0,
-                #     vmax=mean_map.max(),
-                #     interpolation="nearest",
-                # )
-                # ax1.set_title(f"{name} — Mean Wanda Score")
-                # plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+                # Plotting Mean Wanda Score
+                ax1 = axes[i, 0]
+                im1 = ax1.imshow(
+                    mean_map,
+                    aspect="auto",
+                    cmap="viridis",
+                    vmin=0.0,
+                    vmax=mean_map.max() if mean_map.max() > 0 else 1.0,
+                    interpolation="nearest",
+                )
+                ax1.set_title(f"{name} — Mean Wanda Score")
+                plt.colorbar(im1, ax=ax1)
 
-                # ax2 = axes[i, 1]
-                # im2 = ax2.imshow(
-                #     var_map,
-                #     aspect="auto",
-                #     cmap="magma",
-                #     vmin=0.0,
-                #     vmax=var_map.max(),
-                #     interpolation="nearest",
-                # )
-                # ax2.set_title(f"{name} — Variance Component")
-                # plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+                # Plotting Mean Activations
+                ax2 = axes[i, 1]
+                # We show activations as a 1D heatmap (extended for visibility)
+                activ_heatmap = np.tile(mean_activ, (mean_map.shape[0] // 10 or 1, 1))
+                im2 = ax2.imshow(
+                    activ_heatmap,
+                    aspect="auto",
+                    cmap="magma",
+                    interpolation="nearest"
+                )
+                ax2.set_title(f"{name} — Mean Activations")
+                plt.colorbar(im2, ax=ax2)
 
                 f.write(
                     f"{self.pruning_type}, {name}, {mean_map.max():.3f}, {mean_map.mean():.3f}, {mean_map.min():.3f}, {np.median(mean_map):.3f}, {mean_activ.max():.3f}, {mean_activ.mean():.3f}, {mean_activ.min():.3f}, {np.median(mean_activ):.3f}, {mean_activ.var():.3f}\n"
                 )
 
-            # plt.suptitle(
-            #     "Wanda Analysis using " + self.pruning_type + " Pruning", fontsize=16
-            # )
-            # plt.savefig(save_path, dpi=150)
-            # plt.close()
-            log.info(f"Wanda plots saved to {save_path}")
+        plt.suptitle(f"Wanda Analysis: {self.pruning_type}", fontsize=16)
+        plt.savefig(save_path, dpi=150)
+        plt.close()
+        log.info(f"Wanda plots saved to {save_path} and stats to {csv_path}")
+
+    def plot_diff(
+        self, technique, reference="random", save_path="wanda_diff.pdf", max_layers=None
+    ):
+        """
+        Computes the difference in statistics between a technique and a reference,
+        and plots the resulting mean and variance differences as heatmaps.
+        """
+        if technique not in self.results_by_technique:
+            log.error(f"Technique {technique} not found in results.")
+            return
+        if reference not in self.results_by_technique:
+            log.error(f"Reference {reference} not found in results.")
+            return
+
+        tech_res = self.results_by_technique[technique]
+        ref_res = self.results_by_technique[reference]
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        modules = list(tech_res["activations_mean"].keys())
+        if max_layers is not None:
+            modules = modules[:max_layers]
+
+        rows = len(modules)
+        fig, axes = plt.subplots(rows, 2, figsize=(16, 5 * rows), layout="constrained")
+        if rows == 1:
+            axes = np.expand_dims(axes, 0)
+
+        for i, module in enumerate(modules):
+            name = self._module_names.get(module, str(module))
+
+            # Difference of activations means
+            mean_diff = (
+                tech_res["activations_mean"][module]
+                - ref_res["activations_mean"][module]
+            )
+            # Variance of the difference (sum of variances assuming independence)
+            var_diff = (
+                tech_res["activations_var"][module] + ref_res["activations_var"][module]
+            )
+
+            W = self._get_weight(module).detach().float().cpu().abs().numpy()
+
+            # Heatmap values: Weight * Activation_Stat (broadcasting O, I * I)
+            score_mean_diff = W * mean_diff[np.newaxis, :]
+            score_std_diff = W * np.sqrt(var_diff + 1e-12)[np.newaxis, :]
+
+            # Plot Mean Difference
+            ax1 = axes[i, 0]
+            im1 = ax1.imshow(
+                score_mean_diff,
+                aspect="auto",
+                cmap="viridis",
+                interpolation="nearest",
+            )
+            ax1.set_title(f"{name}\nMean Diff ({technique} - {reference})")
+            plt.colorbar(im1, ax=ax1)
+
+            # Plot Std of Difference
+            ax2 = axes[i, 1]
+            im2 = ax2.imshow(
+                score_std_diff, aspect="auto", cmap="viridis", interpolation="nearest"
+            )
+            ax2.set_title(f"{name}\nStd of Diff")
+            plt.colorbar(im2, ax=ax2)
+
+        plt.suptitle(
+            f"Wanda Difference Analysis: {technique} vs {reference}", fontsize=16
+        )
+        plt.savefig(save_path, dpi=150)
+        plt.close()
+        log.info(f"Wanda difference plots saved to {save_path}")
+
+    def plot_summary_heatmaps(self, reference="random", save_path="wanda_summary.pdf"):
+        """
+        Creates two global heatmaps (Mean and Variance) where:
+        - Rows: Sampling techniques
+        - Columns: Model layers
+        - Cell: Stat of the difference matrix (Tech - Reference)
+        """
+        techniques = [t for t in self.results_by_technique.keys() if t != reference]
+        if not techniques:
+            log.warning("No techniques to compare against reference.")
+            return
+
+        # Get modules from the reference results
+        modules = list(self.results_by_technique[reference]["activations_mean"].keys())
+        module_names = [self._module_names.get(m, "Layer").split(".")[-1] for m in modules]
+
+        mean_grid = np.zeros((len(techniques), len(modules)))
+        var_grid = np.zeros((len(techniques), len(modules)))
+
+        for t_idx, tech in enumerate(techniques):
+            tech_res = self.results_by_technique[tech]
+            ref_res = self.results_by_technique[reference]
+            for m_idx, module in enumerate(modules):
+                # Avoid keeping full weight matrix in memory if possible, but we need it locally
+                W = self._get_weight(module).detach().float().cpu().abs().numpy()
+                
+                # Difference in activation norms (H,)
+                # Wanda score difference uses the aggregated feature norm (L2)
+                diff_norm = (
+                    tech_res["feature_norm"][module]
+                    - ref_res["feature_norm"][module]
+                )
+                
+                # Matrix of score differences (O, I)
+                score_diff_matrix = W * diff_norm[np.newaxis, :]
+                
+                mean_grid[t_idx, m_idx] = np.mean(score_diff_matrix)
+                var_grid[t_idx, m_idx] = np.var(score_diff_matrix)
+                
+                # Explicitly delete large matrix
+                del W
+                del score_diff_matrix
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(12, len(modules)//4), 10), layout="constrained")
+        
+        # Plot Mean
+        im1 = ax1.imshow(mean_grid, aspect="auto", cmap="viridis")
+        ax1.set_title(f"Mean of Wanda Score Difference ({self.pruning_type})")
+        ax1.set_yticks(np.arange(len(techniques)), labels=techniques)
+        ax1.set_xticks(np.arange(len(modules)), labels=module_names, rotation=90)
+        ax1.set_ylabel("Techniques")
+        plt.colorbar(im1, ax=ax1)
+
+        # Plot Variance
+        im2 = ax2.imshow(var_grid, aspect="auto", cmap="viridis")
+        ax2.set_title(f"Variance of Wanda Score Difference ({self.pruning_type})")
+        ax2.set_yticks(np.arange(len(techniques)), labels=techniques)
+        ax2.set_xticks(np.arange(len(modules)), labels=module_names, rotation=90)
+        ax2.set_ylabel("Techniques")
+        plt.colorbar(im2, ax=ax2)
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150)
+        plt.close()
+        log.info(f"Summary heatmaps saved to {save_path}")
 
     def remove_hooks(self):
         """Detach all hooks."""

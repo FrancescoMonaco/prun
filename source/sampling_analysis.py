@@ -119,13 +119,13 @@ if __name__ == "__main__":
             )
 
             for pruning_type in [
-                "most_similar",
-                "decoupled",
-                "most_dissimilar",
-                "least_perplexity",
-                "random",
-                "herding",
-                "distribution_matching",
+                # "most_similar",
+                # "decoupled",
+                # "most_dissimilar",
+                # "least_perplexity",
+                # "random",
+                # "herding",
+                # "distribution_matching",
                 "zipf",
                 "unique_tokens",
             ]:
