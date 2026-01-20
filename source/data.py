@@ -50,6 +50,7 @@ DATASET_MAPPING = {
     "opc": ("openai_humaneval", None),
     "ds1000": ("xlangai/DS-1000", None),
     "mbpp": ("mbpp", None),
+    "arc_challenge": ("ai2_arc", "ARC-Challenge"),
 }
 
 
@@ -75,6 +76,8 @@ def get_text_from_item(item, dataset_name):
         return item.get("article", "") + " " + item.get("question", "")
     elif dataset_name == "winogrande":
         return item.get("sentence", "")
+    elif dataset_name == "arc_challenge":
+        return item.get("question", "") + " " + " ".join(item.get("choices", {}).get("text", []))
     elif dataset_name == "wmt14":
         return item.get("translation", {}).get("en", "")
     elif dataset_name == "iwslt":

@@ -286,29 +286,31 @@ class WandaAnalysis:
                 tech_res["activations_var"][module] + ref_res["activations_var"][module]
             )
 
-            W = self._get_weight(module).detach().float().cpu().abs().numpy()
-
-            # Heatmap values: Weight * Activation_Stat (broadcasting O, I * I)
-            score_mean_diff = W * mean_diff[np.newaxis, :]
-            score_std_diff = W * np.sqrt(var_diff + 1e-12)[np.newaxis, :]
+            # Heatmap values: Activation_Stat (broadcasting/tiling for visualization)
+            height = 100
+            score_mean_diff = np.tile(mean_diff, (height, 1))
+            score_rmse = np.tile(np.sqrt(mean_diff**2 + var_diff + 1e-12), (height, 1))
 
             # Plot Mean Difference
             ax1 = axes[i, 0]
+            max_abs = np.max(np.abs(score_mean_diff)) if np.any(score_mean_diff) else 1.0
             im1 = ax1.imshow(
                 score_mean_diff,
                 aspect="auto",
-                cmap="viridis",
+                cmap="RdBu_r",
+                vmin=-max_abs,
+                vmax=max_abs,
                 interpolation="nearest",
             )
-            ax1.set_title(f"{name}\nMean Diff ({technique} - {reference})")
+            ax1.set_title(f"{name}\nActivation Mean Diff ({technique} - {reference})")
             plt.colorbar(im1, ax=ax1)
 
-            # Plot Std of Difference
+            # Plot RMSE of Difference
             ax2 = axes[i, 1]
             im2 = ax2.imshow(
-                score_std_diff, aspect="auto", cmap="viridis", interpolation="nearest"
+                score_rmse, aspect="auto", cmap="viridis", interpolation="nearest"
             )
-            ax2.set_title(f"{name}\nStd of Diff")
+            ax2.set_title(f"{name}\nActivation RMSE of Diff")
             plt.colorbar(im2, ax=ax2)
 
         plt.suptitle(
@@ -335,45 +337,36 @@ class WandaAnalysis:
         module_names = [self._module_names.get(m, "Layer").split(".")[-1] for m in modules]
 
         mean_grid = np.zeros((len(techniques), len(modules)))
-        var_grid = np.zeros((len(techniques), len(modules)))
+        rmse_grid = np.zeros((len(techniques), len(modules)))
 
         for t_idx, tech in enumerate(techniques):
             tech_res = self.results_by_technique[tech]
             ref_res = self.results_by_technique[reference]
             for m_idx, module in enumerate(modules):
-                # Avoid keeping full weight matrix in memory if possible, but we need it locally
-                W = self._get_weight(module).detach().float().cpu().abs().numpy()
-                
                 # Difference in activation norms (H,)
-                # Wanda score difference uses the aggregated feature norm (L2)
+                # We analyze the activation norms directly instead of Wanda scores
                 diff_norm = (
                     tech_res["feature_norm"][module]
                     - ref_res["feature_norm"][module]
                 )
                 
-                # Matrix of score differences (O, I)
-                score_diff_matrix = W * diff_norm[np.newaxis, :]
-                
-                mean_grid[t_idx, m_idx] = np.mean(score_diff_matrix)
-                var_grid[t_idx, m_idx] = np.var(score_diff_matrix)
-                
-                # Explicitly delete large matrix
-                del W
-                del score_diff_matrix
+                mean_grid[t_idx, m_idx] = np.mean(diff_norm)
+                rmse_grid[t_idx, m_idx] = np.sqrt(np.mean(diff_norm**2))
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(12, len(modules)//4), 10), layout="constrained")
         
         # Plot Mean
-        im1 = ax1.imshow(mean_grid, aspect="auto", cmap="viridis")
-        ax1.set_title(f"Mean of Wanda Score Difference ({self.pruning_type})")
+        max_abs_mean = np.max(np.abs(mean_grid)) if np.any(mean_grid) else 1.0
+        im1 = ax1.imshow(mean_grid, aspect="auto", cmap="RdBu_r", vmin=-max_abs_mean, vmax=max_abs_mean)
+        ax1.set_title(f"Mean of Activation Norm Difference")
         ax1.set_yticks(np.arange(len(techniques)), labels=techniques)
         ax1.set_xticks(np.arange(len(modules)), labels=module_names, rotation=90)
         ax1.set_ylabel("Techniques")
         plt.colorbar(im1, ax=ax1)
 
-        # Plot Variance
-        im2 = ax2.imshow(var_grid, aspect="auto", cmap="viridis")
-        ax2.set_title(f"Variance of Wanda Score Difference ({self.pruning_type})")
+        # Plot RMSE
+        im2 = ax2.imshow(rmse_grid, aspect="auto", cmap="viridis")
+        ax2.set_title(f"RMSE of Activation Norm Difference")
         ax2.set_yticks(np.arange(len(techniques)), labels=techniques)
         ax2.set_xticks(np.arange(len(modules)), labels=module_names, rotation=90)
         ax2.set_ylabel("Techniques")

@@ -135,7 +135,7 @@ def random_sample(dataloader, sample_per_dataset):
     calibration_data = []
     for dataset in dataloader:
         if len(dataset) > sample_per_dataset:
-            indices = torch.randperm(len(dataset))[:sample_per_dataset]
+            indices = torch.randperm(len(dataset))[:sample_per_dataset].tolist()
             sampled_data = [dataset[i] for i in indices]
         else:
             sampled_data = dataset
@@ -185,16 +185,16 @@ def use_embedding_for_sampling(
             )
 
         if type == "prototype" or type == "decoupled":
-            sorted_indices = torch.argsort(mean_cosine_similarity, descending=True)
+            sorted_indices = torch.argsort(mean_cosine_similarity, descending=True).tolist()
         elif type == "most_different":
-            sorted_indices = torch.argsort(mean_cosine_similarity, descending=False)
+            sorted_indices = torch.argsort(mean_cosine_similarity, descending=False).tolist()
         elif type == "distribution_matching":
             # Match the distribution of mean similarities (quantiles)
             sorted_indices_all = torch.argsort(mean_cosine_similarity)
             idx_indices = torch.linspace(
                 0, len(sorted_indices_all) - 1, sample_per_dataset
             ).long()
-            sorted_indices = sorted_indices_all[idx_indices]
+            sorted_indices = sorted_indices_all[idx_indices].tolist()
         elif type == "distribution_matching_no_outliers":
             # Match the distribution but exclude the extreme 5% tails
             sorted_indices_all = torch.argsort(mean_cosine_similarity)
@@ -202,14 +202,14 @@ def use_embedding_for_sampling(
             start_idx = int(0.05 * N)
             end_idx = int(0.95 * N)
             idx_indices = torch.linspace(start_idx, end_idx, sample_per_dataset).long()
-            sorted_indices = sorted_indices_all[idx_indices]
+            sorted_indices = sorted_indices_all[idx_indices].tolist()
         elif type == "herding":
             # Flatten embeddings if needed
             if last_hidden_state_array_torch.dim() == 3:
                 emb = torch.mean(last_hidden_state_array_torch, dim=1)
             else:
                 emb = last_hidden_state_array_torch
-            sorted_indices = herding(emb, sample_per_dataset)
+            sorted_indices = herding(emb, sample_per_dataset).tolist()
 
         if type == "decoupled":
             selected_indices = []
@@ -260,8 +260,9 @@ def use_embedding_for_sampling(
 
             if return_distribution:
                 if selected_indices:
+                    # mean_cosine_similarity is a tensor, we can index it with a list of ints
                     sample_distributions.append(
-                        mean_cosine_similarity[torch.stack(selected_indices)].cpu()
+                        mean_cosine_similarity[selected_indices].cpu()
                     )
                 else:
                     sample_distributions.append(torch.tensor([]))
@@ -364,9 +365,9 @@ def use_embedding_for_sampling_iou(
         # print(torch.sort(mean_cosine_similarity, descending=True)[:100])  # Debugging output
 
         if type == "prototype_iou":
-            sorted_indices = torch.argsort(mean_cosine_similarity, descending=True)
+            sorted_indices = torch.argsort(mean_cosine_similarity, descending=True).tolist()
         elif type == "most_different_iou":
-            sorted_indices = torch.argsort(mean_cosine_similarity, descending=False)
+            sorted_indices = torch.argsort(mean_cosine_similarity, descending=False).tolist()
 
         for i in range(sample_per_dataset):
             calibration_data.append(dataset[sorted_indices[i]])
@@ -429,9 +430,9 @@ def use_embedding_for_sampling_st(
         # print(torch.sort(mean_cosine_similarity, descending=True)[:100])  # Debugging output
 
         if type == "prototype_st":
-            sorted_indices = torch.argsort(mean_cosine_similarity, descending=True)
+            sorted_indices = torch.argsort(mean_cosine_similarity, descending=True).tolist()
         elif type == "most_different_st":
-            sorted_indices = torch.argsort(mean_cosine_similarity, descending=False)
+            sorted_indices = torch.argsort(mean_cosine_similarity, descending=False).tolist()
 
         # TODO here check the cosine similarity across the selected samples, to see if they are diverse enough
         # or if they are similar to each other
@@ -477,7 +478,7 @@ def least_perplexity_sampling(
         if return_distribution:
             original_distributions.append(perplexities_tensor)
 
-        sorted_indices = torch.argsort(perplexities_tensor, descending=False)
+        sorted_indices = torch.argsort(perplexities_tensor, descending=False).tolist()
 
         for i in range(sample_per_dataset):
             calibration_data.append(dataset[sorted_indices[i]])

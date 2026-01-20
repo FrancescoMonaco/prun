@@ -56,6 +56,7 @@ def get_tokenized_data(
                 {
                     "input_ids": encoded["input_ids"].squeeze(0),
                     "attention_mask": encoded["attention_mask"].squeeze(0),
+                    "text": text,
                 }
             )
         else:
@@ -64,6 +65,7 @@ def get_tokenized_data(
                 {
                     "input_ids": encoded["input_ids"],
                     "attention_mask": encoded["attention_mask"],
+                    "text": text,
                 }
             )
 
