@@ -125,9 +125,12 @@ def main():
             "distribution_matching",
             "distribution_matching_no_outliers",
             "zipf",
+            "shuffled_zipf",
             "unique_tokens",
+            "random_words",
+            "words_dataset"
         ],
-        default=["unique_tokens"],
+        default=["random_words"],
         help="Types of pruning to perform",
     )
     parser.add_argument(
@@ -216,7 +219,10 @@ def main():
         "distribution_matching": "distribution_matching",
         "distribution_matching_no_outliers": "distribution_matching_no_outliers",
         "zipf": "zipf",
+        "shuffled_zipf": "shuffled_zipf",
         "unique_tokens": "unique_tokens",
+        "random_words": "random_words",
+        "words_dataset": "words_dataset",
     }
 
     # 3. Loop through pruning types

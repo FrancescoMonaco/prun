@@ -201,7 +201,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pruning_types",
         nargs="+",
-        default=["random", "most_similar", "distribution_matching", "least_perplexity", "zipf", "unique_tokens"],
+        default=["random", "most_similar", "distribution_matching", "least_perplexity", "zipf", "unique_tokens", "words_dataset"],
         help="Selection methods to compare",
     )
     parser.add_argument(
@@ -278,6 +278,7 @@ if __name__ == "__main__":
         "distribution_matching": "distribution_matching",
         "zipf": "zipf",
         "unique_tokens": "unique_tokens",
+        "words_dataset": "words_dataset",
     }
 
     for p_type in args.pruning_types:

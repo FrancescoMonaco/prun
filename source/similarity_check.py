@@ -569,19 +569,97 @@ def herding(embeddings, n_samples):
     return torch.tensor(selected_indices)
 
 
-def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
+def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None, shuffle=False):
     """
-    Select samples from each dataset in dataloader that match its token distribution.
-    Ensures 'long' Zipf by explicitly including rare tokens first.
-    If tokenizer is provided, it normalizes tokens (lowercase, no subword markers)
-    to better count unique 'concepts' as requested.
+    Selects samples that maximize the number of rare words (Zipfian distribution).
+    Optionally scrambles the word order if shuffle=True.
+    """
+    if tokenizer is None:
+        raise ValueError("Tokenizer must be provided for Zipf sampling")
+
+    calibration_data = []
+    
+    # 1. Collect all words frequencies in a fast way
+    word_counts = collections.Counter()
+    all_items = []  # Store items to access later
+    
+    # Pre-process word sets for each sentence to avoid re-splitting later
+    sentence_word_sets = [] 
+
+    print("Collecting word statistics for Zipf sampling...", flush=True)
+    
+    # Iterate over all datasets in the dataloader list
+    for dataset in dataloader:
+        for item in dataset:
+            input_ids = item["input_ids"]
+            if isinstance(input_ids, torch.Tensor):
+                input_ids = input_ids.view(-1).tolist()
+                
+            text = tokenizer.decode(input_ids, skip_special_tokens=True).lower()
+            
+            # Simple tokenization by splitting
+            words = text.replace('.', ' ').replace(',', ' ').split()
+            
+            # If shuffle is requested, shuffle the words in the list and re-tokenize
+            if shuffle:
+                np.random.shuffle(words)
+                shuffled_text = " ".join(words)
+                
+                # Re-encode to get input_ids back for the 'item'
+                # Truncate to standard length
+                encoded = tokenizer(shuffled_text, truncation=True, max_length=128, return_tensors="pt")
+                if encoded.input_ids.shape[1] == 0: 
+                    continue
+                
+                # Create a new item with shuffled content
+                new_item = {
+                    "input_ids": encoded.input_ids[0].cpu(),
+                    "attention_mask": encoded.attention_mask[0].cpu()
+                }
+                all_items.append(new_item)
+            else:
+                all_items.append(item)
+            
+            # Important: Update word counts even if shuffled (counts are invariant to shuffle)
+            word_counts.update(words)
+            
+            # Store unique words for this sentence
+            sentence_word_sets.append(set(words))
+            
+    # 2. Identify "rare" words
+    # Calculate Rareness Score for each word: 1 / frequency
+    word_scores = {w: 1.0 / count for w, count in word_counts.items()}
+    
+    # 3. Score sentences
+    sentence_scores = []
+    for words_set in sentence_word_sets:
+        # Score = Sum of scores of unique words in the sentence
+        # We use unique words so repeating a rare word doesn't boost score artificially
+        score = sum(word_scores.get(w, 0) for w in words_set)
+        sentence_scores.append(score)
+    
+    # 4. Select top samples
+    # Get indices of top `sample_per_dataset` scores
+    # If we have fewer items than requested, take all
+    n_select = min(len(all_items), sample_per_dataset)
+    top_indices = np.argsort(sentence_scores)[-n_select:]
+    
+    for idx in top_indices:
+        calibration_data.append(all_items[idx])
+        
+    print(f"Zipf Sampling (shuffle={shuffle}): Selected {len(calibration_data)} samples.")
+    return calibration_data
+
+def old_zipf_sampling_disabled(dataloader, sample_per_dataset, tokenizer=None):
+    """
+    Original Zipf sampling logic (Tail Coverage + Greedy Distribution Matching).
+    Renamed to avoid conflict with new Shuffled-aware Zipf sampling.
     """
     calibration_data = []
 
     for indice, dataset in enumerate(dataloader):
-        print(f"\nZipf sampling for Dataset {indice}", flush=True)
+        print(f"Old Zipf sampling for Dataset {indice}", flush=True)
 
-        # 1. Collect all tokenized items and flatten IDs
         all_items = []
         for item in dataset:
             if isinstance(item, dict):
@@ -589,14 +667,9 @@ def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
             else:
                 all_items.append({"input_ids": item})
 
-        # 2. Global counts for target distribution
-        global_counts = collections.Counter()
-        sentence_tokens = []
-
-        # Pre-calculate mapping if tokenizer is available for efficiency
+        # 1. Pre-calculate normalization map
         id_to_norm = {}
         if tokenizer:
-            print("Pre-calculating token normalization map...", flush=True)
             all_unique_ids = set()
             for item in all_items:
                 ids = item["input_ids"]
@@ -608,7 +681,6 @@ def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
                 if tid in tokenizer.all_special_ids:
                     id_to_norm[tid] = None
                     continue
-                # Decode, lowercase, and remove subword markers/whitespace
                 t_str = (
                     tokenizer.decode([tid], skip_special_tokens=True)
                     .lower()
@@ -617,6 +689,9 @@ def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
                     .strip()
                 )
                 id_to_norm[tid] = t_str if t_str else None
+
+        global_counts = collections.Counter()
+        sentence_tokens = []
 
         for item in all_items:
             ids = item["input_ids"]
@@ -628,11 +703,11 @@ def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
                     id_to_norm[tid] for tid in ids if id_to_norm.get(tid) is not None
                 ]
             else:
-                # Filter out padding/special tokens even without a tokenizer (assume 0 is pad)
                 ids_to_use = [tid for tid in ids if tid != 0]
 
             global_counts.update(ids_to_use)
             sentence_tokens.append(ids_to_use)
+
 
         total_tokens = sum(global_counts.values())
         if total_tokens == 0:
@@ -718,7 +793,6 @@ def zipf_sampling(dataloader, sample_per_dataset, tokenizer=None):
             calibration_data.append(dataset[i])
 
     return calibration_data
-
 
 def unique_tokens_sampling(dataloader, sample_per_dataset, tokenizer=None):
     """
@@ -830,6 +904,110 @@ def unique_tokens_sampling(dataloader, sample_per_dataset, tokenizer=None):
     return calibration_data
 
 
+def random_words_sampling(nsamples, tokenizer, sentence_length=128):
+    """
+    Generates samples consisting of random English words.
+    """
+    import random
+    from nltk.corpus import words
+
+    try:
+        word_list = words.words()
+    except LookupError:
+        import nltk
+
+        nltk.download("words")
+        word_list = words.words()
+
+    calibration_data = []
+    print(f"Generating {nsamples} samples of random words...", flush=True)
+    for _ in range(nsamples):
+        sentence = " ".join(random.choices(word_list, k=sentence_length))
+        encoded = tokenizer(
+            sentence,
+            truncation=True,
+            max_length=sentence_length,
+            padding="max_length",
+            return_tensors="pt",
+        )
+        calibration_data.append(
+            {
+                "input_ids": encoded["input_ids"].squeeze(0),
+                "attention_mask": encoded["attention_mask"].squeeze(0),
+            }
+        )
+    return calibration_data
+
+
+def words_dataset_sampling(dataloader, nsamples, tokenizer, sentence_length=128):
+    """
+    Collects all unique words from the dataset, lowercases them,
+    and generates new samples by combining these words.
+    """
+    import random
+
+    all_words = set()
+    print("Collecting unique words from dataset...", flush=True)
+
+    for dataset in dataloader:
+        for item in dataset:
+            if isinstance(item, dict):
+                input_ids = item["input_ids"]
+            elif isinstance(item, (list, tuple)):
+                input_ids = item[0]
+            else:
+                input_ids = item
+
+            if isinstance(input_ids, torch.Tensor):
+                input_ids = input_ids.view(-1).tolist()
+
+            # Decode the sequence to get the text
+            text = tokenizer.decode(input_ids, skip_special_tokens=True)
+            # Split into words (simplistic splitting)
+            words = text.lower().split()
+            all_words.update(words)
+
+    unique_words = list(all_words)
+    random.shuffle(unique_words)
+
+    print(
+        f"Found {len(unique_words)} unique words. Generating {nsamples} samples...",
+        flush=True,
+    )
+
+    calibration_data = []
+    word_idx = 0
+    num_unique_words = len(unique_words)
+
+    if num_unique_words == 0:
+        print("Warning: No words found in dataset. Returning empty calibration data.")
+        return []
+
+    for _ in range(nsamples):
+        # Pick words for the next sentence
+        sentence_words = []
+        for _ in range(sentence_length):
+            sentence_words.append(unique_words[word_idx % num_unique_words])
+            word_idx += 1
+
+        sentence = " ".join(sentence_words)
+        encoded = tokenizer(
+            sentence,
+            truncation=True,
+            max_length=sentence_length,
+            padding="max_length",
+            return_tensors="pt",
+        )
+        calibration_data.append(
+            {
+                "input_ids": encoded["input_ids"].squeeze(0),
+                "attention_mask": encoded["attention_mask"].squeeze(0),
+            }
+        )
+
+    return calibration_data
+
+
 @memory.cache(ignore=["model", "dataloader", "tokenizer"])
 def prepare_calibration(
     model,
@@ -927,10 +1105,22 @@ def prepare_calibration(
         calibration_data = zipf_sampling(
             dataloader, initial_sample_per_dataset, tokenizer=tokenizer
         )
+    elif type == "shuffled_zipf":
+        calibration_data = zipf_sampling(
+            dataloader, initial_sample_per_dataset, tokenizer=tokenizer, shuffle=True
+        )
     elif type == "unique_tokens":
         calibration_data = unique_tokens_sampling(
             dataloader, initial_sample_per_dataset, tokenizer=tokenizer
         )
+    elif type == "unique_tokens_shuffled":
+        calibration_data = unique_tokens_sampling(
+            dataloader, initial_sample_per_dataset, tokenizer=tokenizer, shuffle=True
+        )
+    elif type == "random_words":
+        calibration_data = random_words_sampling(nsamples, tokenizer)
+    elif type == "words_dataset":
+        calibration_data = words_dataset_sampling(dataloader, nsamples, tokenizer)
 
     # Coreset resampling if we have multiple datasets
     if len(dataloader) > 1 and type != "concat":

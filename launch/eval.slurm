@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=eval_prune
+#SBATCH --job-name=R50_v6_%j
 #SBATCH --output=logs/eval_%j.out
 #SBATCH --error=logs/eval_%j.err
 #SBATCH -N 1
@@ -15,7 +15,7 @@
 #SBATCH --array=0-2
 
 DATASET_PREF="--datasets"
-DATASETS=("winogrande gsm8k boolq" "commonsense_qa gsm8k boolq" "winogrande gsm8k boolq ds1000 race mawps wmt rte")
+DATASETS=("winogrande" "arc_challenge" "boolq") 
 MODEL_PREF="--model"
 MODELS=("google/gemma-7b" "Qwen/Qwen3-8B" "meta-llama/Llama-3.2-3B") #"microsoft/Phi-2"
 NUM_SAMPLES_PREFIX="--nsamples"

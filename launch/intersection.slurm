@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=intersect
+#SBATCH --job-name=R50_v6_?
 #SBATCH --output=logs/intersect_%j.out
 #SBATCH --error=logs/intersect_%j.err
 #SBATCH -N 1

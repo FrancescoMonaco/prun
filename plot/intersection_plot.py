@@ -18,7 +18,7 @@ def main():
     df = pd.read_csv(args.csv)
     df['label'] = df['label'].astype(str)
 
-    # Robust accuracy selection: take the best available accuracy metric
+    # Select the correct accuracy column
     acc_cols = [c for c in df.columns if 'acc' in c.lower() and 'stderr' not in c.lower()]
     if not acc_cols:
         print(f"Available columns: {df.columns.tolist()}")
@@ -28,7 +28,7 @@ def main():
     # Create a single accuracy column by taking the first non-null or max value from accuracy columns
     df['accuracy'] = df[acc_cols].max(axis=1)
     
-    # Filter out rows where accuracy is still null
+    # Filter out rows where accuracy is null
     df = df[df['accuracy'].notnull()]
 
     models = sorted(df['model'].unique())
@@ -40,7 +40,7 @@ def main():
         print("No models found in the data.")
         return
 
-    # Create a consistent color mapping for all tasks across all models
+    # Color palette for tasks
     all_tasks = sorted(df['target_task'].unique())
     task_colors = sns.color_palette("husl", len(all_tasks))
     task_to_color = dict(zip(all_tasks, task_colors))
