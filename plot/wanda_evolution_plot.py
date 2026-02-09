@@ -102,15 +102,15 @@ def main():
                 ax.set_title(f"Model: {model_name.split('/')[-1]}", fontsize=14)
             
             if c == 0:
-                ax.set_ylabel(f"{cal_ds}\nWanda Score Mean", fontsize=12)
+                ax.set_ylabel(f"{cal_ds}\nTop 5% Activations Mean", fontsize=12)
             
             ax.set_xlabel("N Samples", fontsize=12)
             
             # Aggiungi legenda solo se siamo nell'ultimo subplot per non affollare
             if r == 0 and c == n_models - 1:
-                ax.legend(title="Wanda Scores", loc='upper left', bbox_to_anchor=(1.02, 1))
+                ax.legend(title="Top 5% Activations", loc='upper left', bbox_to_anchor=(1.02, 1))
 
-    plt.suptitle("Evolution of Mean Wanda Scores (Last Layers) adding Samples", fontsize=16)
+    plt.suptitle("Evolution of Mean Top 5% Activations (Last Layers) adding Samples", fontsize=16)
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     plt.savefig(args.output, dpi=300, bbox_inches='tight')
     print(f"Plot saved to {args.output}")

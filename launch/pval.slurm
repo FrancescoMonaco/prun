@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:1
-#SBATCH --partition=long
+#SBATCH --partition=short
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=francescopio.monaco@unitn.it
 

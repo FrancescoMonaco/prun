@@ -140,7 +140,7 @@ def main():
     parser.add_argument(
         "--output_csv",
         type=str,
-        default="results/experiment_results.csv",
+        default="results/experiment_results_new.csv",
         help="Output CSV file",
     )
     parser.add_argument(

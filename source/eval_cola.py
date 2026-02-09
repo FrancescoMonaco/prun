@@ -8,6 +8,7 @@ from filelock import FileLock
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import Dataset
 from llmcompressor.modifiers.pruning import WandaPruningModifier
+from llmcompressor.modifiers.quantization import GPTQModifier
 from llmcompressor import oneshot
 
 # Add COLA to sys.path
@@ -81,6 +82,13 @@ def main():
             "openbookqa",
         ],
         help="Tasks for evaluation (lm_eval names)",
+    )
+    parser.add_argument(
+        "--compression_type",
+        type=str,
+        default="pruning",
+        choices=["pruning", "quantization"],
+        help="Type of compression to perform",
     )
     parser.add_argument(
         "--pruning_types",
@@ -243,21 +251,22 @@ def main():
                 model_name=args.model,
             )
 
-        # 4. Prune the model
-        log.info(f"Pruning model with {p_type} calibration data...")
-        recipe = WandaPruningModifier(
-            sparsity=args.sparsity,
-            targets="re:.*layers.*",
-        )
+        # 4. Prune or Quantize the model
+        log.info(f"Compressing model with {args.compression_type} using {p_type} calibration data...")
 
         # Convert calibration data to Dataset object for llmcompressor
         calibration_dataset = Dataset.from_list(calibration_data)
 
-        oneshot(
-            model=model,
-            recipe=recipe,
-            dataset=calibration_dataset,
-        )
+        if args.compression_type == "pruning":
+            log.info(f"Pruning model with sparsity {args.sparsity}...")
+            recipe = WandaPruningModifier(
+                sparsity=args.sparsity, mask_structure="0:0", targets="__ALL__"
+            )
+        else:
+            log.info("Quantizing model with GPTQ...")
+            recipe = GPTQModifier(targets="Linear", scheme="W4A16")
+
+        oneshot(model=model, dataset=calibration_dataset, recipe=recipe)
 
         # 5. Evaluate pruned model
         log.info(f"Evaluating pruned model ({p_type})...")
@@ -270,6 +279,7 @@ def main():
             m.update(
                 {
                     "model": args.model,
+                    "compression_type": args.compression_type,
                     "pruning_type": p_type,
                     "nsamples": args.nsamples,
                     "sparsity": args.sparsity,

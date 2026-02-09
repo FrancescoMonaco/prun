@@ -301,6 +301,17 @@ def main():
             tokenizer, nsamples=args.nsamples, seq_len=128,
             model=st_model, dataloader=current_tokenized_data, dataset_name=d_name
         )
+        
+        log.info(f"{d_name}: Computing stats for dataset words")
+        datasets_words_list = prepare_calibration(
+            model=st_model,
+            dataloader=current_tokenized_data,
+            nsamples=args.nsamples,
+            type="words_dataset",
+            tokenizer=tokenizer,
+            dataset_name=d_name,
+            model_name=args.model.replace("/", "-")
+        )
 
         # 5. Get Statistics
         log.info(f"{d_name}: Computing stats for Random...")
@@ -314,6 +325,9 @@ def main():
         
         log.info(f"{d_name}: Computing stats for Shuffled Zipf...")
         stats_shuffled = get_layer_stats(model, shuffled_zipf_list, n_layers=3, device=device)
+        
+        log.info(f"{d_name}: Computing stats for dataset words")
+        stats_dataset_words = get_layer_stats(model, datasets_words_list, n_layers=3, device=device)
 
         # 6. Compare Pairs
         # We want to compare: 
@@ -324,7 +338,9 @@ def main():
         comparisons = [
             ("random", stats_rand, "zipf", stats_zipf),
             ("random_words", stats_random_words, "zipf", stats_zipf),
-            ("shuffled_zipf", stats_shuffled, "zipf", stats_zipf)
+            ("shuffled_zipf", stats_shuffled, "zipf", stats_zipf),
+            ("random", stats_rand, "dataset_words", stats_dataset_words),
+            ("random_words", stats_random_words, "dataset_words", stats_dataset_words)
         ]
 
         for method1_name, stats1, method2_name, stats2 in comparisons:

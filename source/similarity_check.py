@@ -941,13 +941,13 @@ def random_words_sampling(nsamples, tokenizer, sentence_length=128):
 
 def words_dataset_sampling(dataloader, nsamples, tokenizer, sentence_length=128):
     """
-    Collects all unique words from the dataset, lowercases them,
-    and generates new samples by combining these words.
+    Collects all words from the dataset, maintain their original frequencies,
+    and generates new samples by combining them (Zipf-aware sampling).
     """
     import random
 
-    all_words = set()
-    print("Collecting unique words from dataset...", flush=True)
+    all_tokens = []
+    print("Collecting words from dataset for Zipf-aware sampling...", flush=True)
 
     for dataset in dataloader:
         for item in dataset:
@@ -965,30 +965,30 @@ def words_dataset_sampling(dataloader, nsamples, tokenizer, sentence_length=128)
             text = tokenizer.decode(input_ids, skip_special_tokens=True)
             # Split into words (simplistic splitting)
             words = text.lower().split()
-            all_words.update(words)
+            all_tokens.extend(words)
 
-    unique_words = list(all_words)
-    random.shuffle(unique_words)
+    if not all_tokens:
+        print("Warning: No words found in dataset. Returning empty calibration data.")
+        return []
+
+    # Shuffle all tokens to create a random bag-of-words pool that matches the original distribution
+    random.shuffle(all_tokens)
+    num_tokens = len(all_tokens)
 
     print(
-        f"Found {len(unique_words)} unique words. Generating {nsamples} samples...",
+        f"Collected {num_tokens} tokens. Generating {nsamples} samples...",
         flush=True,
     )
 
     calibration_data = []
-    word_idx = 0
-    num_unique_words = len(unique_words)
-
-    if num_unique_words == 0:
-        print("Warning: No words found in dataset. Returning empty calibration data.")
-        return []
+    token_idx = 0
 
     for _ in range(nsamples):
-        # Pick words for the next sentence
+        # Pick words for the next sentence by cycling through the token pool
         sentence_words = []
         for _ in range(sentence_length):
-            sentence_words.append(unique_words[word_idx % num_unique_words])
-            word_idx += 1
+            sentence_words.append(all_tokens[token_idx % num_tokens])
+            token_idx += 1
 
         sentence = " ".join(sentence_words)
         encoded = tokenizer(
