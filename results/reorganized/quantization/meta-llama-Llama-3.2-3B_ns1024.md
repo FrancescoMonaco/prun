@@ -34,32 +34,34 @@ Mean & 0.5742 & 0.5811 & 0.5792 & 0.5817 & 0.5852 & 0.5835 \\
 \end{tabular}
 ```
 
-## Comparison: Distribution Matching vs COLA
+## Comparison: Unique Tokens vs COLA
 
-| task          |   original |   distribution_matching |
-|:--------------|-----------:|------------------------:|
-| arc_challenge |   0.427474 |                0.430674 |
-| arc_easy      |   0.744949 |                0.713699 |
-| boolq         |   0.74159  |                0.72054  |
-| hellaswag     |   0.558156 |                0.634709 |
-| openbookqa    |   0.312    |                0.353667 |
-| rte           |   0.541516 |                0.523466 |
-| winogrande    |   0.693765 |                0.686661 |
+| task          |   original |     cola |   unique_tokens |
+|:--------------|-----------:|---------:|----------------:|
+| arc_challenge |   0.427474 | 0.381853 |        0.428274 |
+| arc_easy      |   0.744949 | 0.662234 |        0.715251 |
+| boolq         |   0.74159  | 0.693502 |        0.729549 |
+| hellaswag     |   0.558156 | 0.563175 |        0.634977 |
+| openbookqa    |   0.312    | 0.3195   |        0.355    |
+| rte           |   0.541516 | 0.548511 |        0.526625 |
+| winogrande    |   0.693765 | 0.661109 |        0.694653 |
+| Mean          |   0.574207 | 0.547126 |        0.583476 |
 
 ### LaTeX Comparison Table
 
 ```latex
-\begin{tabular}{lrr}
+\begin{tabular}{lrrr}
 \toprule
- & original & distribution_matching \\
+ & original & cola & unique_tokens \\
 \midrule
-arc_challenge & 0.4275 & 0.4307 \\
-arc_easy & 0.7449 & 0.7137 \\
-boolq & 0.7416 & 0.7205 \\
-hellaswag & 0.5582 & 0.6347 \\
-openbookqa & 0.3120 & 0.3537 \\
-rte & 0.5415 & 0.5235 \\
-winogrande & 0.6938 & 0.6867 \\
+arc_challenge & 0.4275 & 0.3819 & \cellcolor{blue!15} \textbf{0.4283} \\
+arc_easy & 0.7449 & 0.6622 & \cellcolor{blue!15} \textbf{0.7153} \\
+boolq & 0.7416 & 0.6935 & \cellcolor{blue!15} \textbf{0.7295} \\
+hellaswag & 0.5582 & 0.5632 & \cellcolor{blue!15} \textbf{0.6350} \\
+openbookqa & 0.3120 & 0.3195 & \cellcolor{blue!15} \textbf{0.3550} \\
+rte & 0.5415 & \cellcolor{blue!15} \textbf{0.5485} & 0.5266 \\
+winogrande & 0.6938 & 0.6611 & \cellcolor{blue!15} \textbf{0.6947} \\
+Mean & 0.5742 & 0.5471 & 0.5835 \\
 \bottomrule
 \end{tabular}
 ```

@@ -11,7 +11,7 @@
 #SBATCH --mail-user=francescopio.monaco@unitn.it
 
 # Run as an array: one array task per (model, dataset)
-#SBATCH --array=0-17
+#SBATCH --array=0-17%5
 
 DATASET_PREF="--datasets"
 DATASETS=("winogrande" "arc_challenge" "boolq" "hellaswag" "openbookqa" "rte") 
@@ -20,7 +20,7 @@ MODELS=("google/gemma-7b" "Qwen/Qwen3-8B" "meta-llama/Llama-3.2-3B") #"microsoft
 NUM_SAMPLES_PREFIX="--nsamples"
 SPARSITY_PREFIX="--sparsity"
 SPARSITY="0.5"
-NUM_SAMPLES=(128 512 1024)
+NUM_SAMPLES=(16)
 COMPRESSION_PREFIX="--compression_type"
 COMPRESSION_TYPE=("pruning" "quantization")
 PRUNING_PREFIX="--pruning_types"

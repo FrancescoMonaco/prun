@@ -1008,6 +1008,63 @@ def words_dataset_sampling(dataloader, nsamples, tokenizer, sentence_length=128)
     return calibration_data
 
 
+def dictionary_sampling(nsamples, tokenizer, sentence_length=128):
+    """
+    Generates samples consisting of the whole dictionary words.
+    Ignores nsamples usually, returning the full dictionary chunked.
+    """
+    from nltk.corpus import words
+    try:
+        word_list = words.words()
+    except LookupError:
+        import nltk
+        nltk.download("words")
+        word_list = words.words()
+
+    print(f"Loading dictionary with {len(word_list)} words...", flush=True)
+    full_text = " ".join(word_list)
+    
+    # Tokenize the full dictionary text
+    encoded = tokenizer(
+        full_text,
+        add_special_tokens=False,
+        return_tensors="pt"
+    )
+    input_ids = encoded["input_ids"][0] # (N,)
+    attention_mask = encoded["attention_mask"][0] # (N,)
+    
+    total_tokens = input_ids.size(0)
+    print(f"Total tokens in dictionary: {total_tokens}", flush=True)
+    
+    calibration_data = []
+    
+    for i in range(0, total_tokens, sentence_length):
+        chunk_ids = input_ids[i : i + sentence_length]
+        chunk_mask = attention_mask[i : i + sentence_length]
+        
+        # Pad if needed
+        if chunk_ids.size(0) < sentence_length:
+            pad_len = sentence_length - chunk_ids.size(0)
+            pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
+            
+            # Create padding tensor and concatenate
+            padding = torch.full((pad_len,), pad_id, dtype=chunk_ids.dtype, device=chunk_ids.device)
+            chunk_ids = torch.cat([chunk_ids, padding])
+            
+            padding_mask = torch.zeros((pad_len,), dtype=chunk_mask.dtype, device=chunk_mask.device)
+            chunk_mask = torch.cat([chunk_mask, padding_mask])
+            
+        calibration_data.append(
+            {
+                "input_ids": chunk_ids,
+                "attention_mask": chunk_mask,
+            }
+        )
+        
+    print(f"Created {len(calibration_data)} dictionary samples (ignoring nsamples={nsamples})", flush=True)
+    return calibration_data
+
+
 @memory.cache(ignore=["model", "dataloader", "tokenizer"])
 def prepare_calibration(
     model,
@@ -1121,6 +1178,8 @@ def prepare_calibration(
         calibration_data = random_words_sampling(nsamples, tokenizer)
     elif type == "words_dataset":
         calibration_data = words_dataset_sampling(dataloader, nsamples, tokenizer)
+    elif type == "dictionary":
+        calibration_data = dictionary_sampling(nsamples, tokenizer)
 
     # Coreset resampling if we have multiple datasets
     if len(dataloader) > 1 and type != "concat":

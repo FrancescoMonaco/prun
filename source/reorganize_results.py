@@ -24,29 +24,43 @@ def get_group(dataset_name):
 
 
 def format_latex_comparison(df):
+    # Calculate Mean row
+    mean_row = df.mean(axis=0, skipna=True)
+
     header = " & " + " & ".join(df.columns) + " \\\\\n\\midrule\n"
     rows = []
     for task, row in df.iterrows():
         row_str = f"{task}"
-        # Compare Distribution Matching vs COLA
-        methods = [c for c in df.columns if c in ["distribution_matching", "cola"]]
+        # Compare Unique Tokens vs COLA
+        methods = [c for c in df.columns if c in ["unique_tokens", "cola"]]
         best_method = None
         if len(methods) == 2:
-            if row["distribution_matching"] > row["cola"]:
-                best_method = "distribution_matching"
-            elif row["cola"] > row["distribution_matching"]:
+            if row["unique_tokens"] > row["cola"]:
+                best_method = "unique_tokens"
+            elif row["cola"] > row["unique_tokens"]:
                 best_method = "cola"
 
         for col in df.columns:
             val = row[col]
             if pd.isna(val):
                 row_str += " & nan"
-            elif col == best_method:
+            elif col == best_method and best_method is not None:
                 row_str += f" & \\cellcolor{{blue!15}} \\textbf{{{val:.4f}}}"
             else:
                 row_str += f" & {val:.4f}"
         row_str += " \\\\"
         rows.append(row_str)
+
+    # Add Mean Row
+    mean_str = "Mean"
+    for col in df.columns:
+        val = mean_row[col]
+        if pd.isna(val):
+             mean_str += " & nan"
+        else:
+             mean_str += f" & {val:.4f}"
+    mean_str += " \\\\"
+    rows.append(mean_str)
 
     return (
         "\\begin{tabular}{l"
@@ -65,15 +79,31 @@ def reorganize_results(csv_path, cola_csv_path):
 
     df_main = pd.read_csv(csv_path)
 
+    # Ensure numeric columns are actually numeric
+    cols_to_numeric = ["pruned_value", "original_value"]
+    for col in cols_to_numeric:
+        if col in df_main.columns:
+             df_main[col] = pd.to_numeric(df_main[col], errors="coerce")
+
     df_main["group"] = df_main["calibration_datasets"].apply(get_group)
 
     df_cola = pd.DataFrame()
     if os.path.exists(cola_csv_path):
         try:
             df_cola = pd.read_csv(cola_csv_path)
+            # Check if headers look like data (missing expected columns)
+            # Observed format: task, metric, value, model, compression_type, sampling, nsamples, sparsity, datasets
+            if "task" not in df_cola.columns and "model" not in df_cola.columns:
+                 df_cola = pd.read_csv(cola_csv_path, header=None, names=["task", "metric", "pruned_value", "model", "compression_type", "sampling", "nsamples", "sparsity", "datasets"])
+
             # Standardize COLA columns to match main DF
             if "value" in df_cola.columns:
                 df_cola = df_cola.rename(columns={"value": "pruned_value"})
+            
+            # Ensure pruned_value is numeric
+            if "pruned_value" in df_cola.columns:
+                 df_cola["pruned_value"] = pd.to_numeric(df_cola["pruned_value"], errors="coerce")
+
             if "datasets" in df_cola.columns:
                 df_cola["group"] = df_cola["datasets"].apply(get_group)
         except Exception as e:
@@ -137,16 +167,15 @@ def reorganize_results(csv_path, cola_csv_path):
                 orig_values = model_ns_df.groupby("task")["original_value"].first()
                 final_avg.insert(0, "original", orig_values)
 
-                # --- COLA vs Distribution Matching Comparison ---
+                # --- COLA vs Unique Tokens Comparison ---
                 comp_data = []
-                # Check for distribution matching
-                dist_match = model_ns_df[model_ns_df[method_col] == "distribution_matching"]
-                if not dist_match.empty:
-                    dist_avg = dist_match.groupby("task")["pruned_value"].mean()
-                    for task, val in dist_avg.items():
-                        comp_data.append(
-                            {"task": task, "method": "distribution_matching", "value": val}
-                        )
+                # Check for unique_tokens
+                if "unique_tokens" in final_avg.columns:
+                    for task, val in final_avg["unique_tokens"].items():
+                        if pd.notna(val):
+                            comp_data.append(
+                                {"task": task, "method": "unique_tokens", "value": val}
+                            )
 
                 if not df_cola.empty:
                     cola_method_col = "sampling" if "sampling" in df_cola.columns else "pruning_type"
@@ -157,7 +186,19 @@ def reorganize_results(csv_path, cola_csv_path):
                             & (df_cola[cola_method_col] == "cola")
                         ]
                         if not cola_match.empty:
-                            cola_avg = cola_match.groupby("task")["pruned_value"].mean()
+                            # Use group-averaging for COLA as well for consistency if group col exists
+                            if "group" in cola_match.columns:
+                                cola_group_avg = (
+                                    cola_match.groupby(["task", "group"])["pruned_value"]
+                                    .mean()
+                                    .reset_index()
+                                )
+                                cola_avg = (
+                                    cola_group_avg.groupby("task")["pruned_value"].mean()
+                                )
+                            else:
+                                cola_avg = cola_match.groupby("task")["pruned_value"].mean()
+
                             for task, val in cola_avg.items():
                                 comp_data.append({"task": task, "method": "cola", "value": val})
 
@@ -276,8 +317,12 @@ def reorganize_results(csv_path, cola_csv_path):
                     f.write("\n```\n\n")
 
                     if not comparison_df.empty:
-                        f.write("## Comparison: Distribution Matching vs COLA\n\n")
-                        f.write(comparison_df.to_markdown())
+                        f.write("## Comparison: Unique Tokens vs COLA\n\n")
+                        # Add Mean row for Markdown
+                        comp_df_md = comparison_df.copy()
+                        mean_row = comp_df_md.mean(axis=0, skipna=True)
+                        comp_df_md.loc["Mean"] = mean_row
+                        f.write(comp_df_md.to_markdown())
                         f.write("\n\n")
                         f.write("### LaTeX Comparison Table\n\n")
                         f.write("```latex\n")
@@ -290,5 +335,5 @@ def reorganize_results(csv_path, cola_csv_path):
 if __name__ == "__main__":
     reorganize_results(
         "results/experiment_results_new.csv",
-        "results/cola_experiment_results.csv",
+        "results/cola_results_new.csv",
     )

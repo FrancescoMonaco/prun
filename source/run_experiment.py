@@ -128,7 +128,8 @@ def main():
             "shuffled_zipf",
             "unique_tokens",
             "random_words",
-            "words_dataset"
+            "words_dataset",
+            "dictionary"
         ],
         default=["random_words"],
         help="Types of pruning to perform",
@@ -223,6 +224,7 @@ def main():
         "unique_tokens": "unique_tokens",
         "random_words": "random_words",
         "words_dataset": "words_dataset",
+        "dictionary": "dictionary",
     }
 
     # 3. Loop through pruning types

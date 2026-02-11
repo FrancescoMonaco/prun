@@ -117,7 +117,7 @@ def plot_pos_distribution(all_pos_counts, labels, output_path):
     plt.title("Part-of-Speech Distribution Comparison")
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, dpi=500)
     print(f"POS distribution plot saved to {output_path}")
 
 def plot_token_distribution(all_counts, labels, output_path, tokenizer, top_n=30):
@@ -175,7 +175,7 @@ def plot_token_distribution(all_counts, labels, output_path, tokenizer, top_n=30
     ax2.grid(True, which="both", ls="-", alpha=0.2)
     
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, dpi=500)
     print(f"Plot saved to {output_path}")
 
 if __name__ == "__main__":
