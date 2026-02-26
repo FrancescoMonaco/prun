@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 # ── Default Meta-Llama models for COLA (need the actual model for activations) ──
 DEFAULT_COLA_MODELS = [
-    #"meta-llama/Llama-3.2-3B",
+    "meta-llama/Llama-3.2-3B",
     "meta-llama/Llama-3.1-8B",   # text-only (no 11B text exists in Llama 3.x)
     "meta-llama/Llama-3.1-70B",  # Needs multi-GPU
 ]
