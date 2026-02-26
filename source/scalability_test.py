@@ -11,7 +11,7 @@ from data import get_dataset, get_text_from_item
 from similarity_check import prepare_calibration
 
 # Add COLA to sys.path
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "COLA"))
+sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), "..", "COLA"))
 from cola.sample_selection import select_samples
 from cola.dataset_processing import tokenize_text
 
