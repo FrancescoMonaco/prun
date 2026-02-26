@@ -1,0 +1,23 @@
+\begin{table}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l|ccccccccccccc}
+\toprule
+Task & \multicolumn{1}{c}{Original} & \multicolumn{6}{c}{COLA} & \multicolumn{6}{c}{unique\_tokens} \\
+\cmidrule(lr){3-8} \cmidrule(lr){9-14}
+ &  & arc\_challenge & boolq & hellaswag & openbookqa & rte & winogrande & arc\_challenge & boolq & hellaswag & openbookqa & rte & winogrande \\
+\midrule
+arc\_challenge & \cellcolor{green!60} 0.5384 & 0.4010 & \cellcolor{green!35} 0.4411 & 0.4121 & 0.4164 & 0.4096 & 0.3268 & 0.4036 & \cellcolor{green!15} 0.4352 & 0.4283 & 0.4087 & 0.3968 & 0.3362 \\
+arc\_easy & \cellcolor{green!60} 0.8085 & 0.6768 & \cellcolor{green!15} 0.7066 & 0.6835 & 0.6789 & 0.6747 & 0.5749 & 0.6814 & \cellcolor{green!35} 0.7117 & 0.6898 & 0.6827 & 0.6692 & 0.5930 \\
+boolq & \cellcolor{green!60} 0.8361 & 0.6777 & \cellcolor{green!15} 0.7193 & 0.6936 & 0.6957 & 0.7052 & 0.6159 & 0.6804 & \cellcolor{green!35} 0.7269 & 0.6792 & 0.6884 & 0.7086 & 0.6101 \\
+hellaswag & \cellcolor{green!60} 0.8095 & 0.5441 & 0.6232 & \cellcolor{green!15} 0.6312 & 0.5711 & 0.5888 & 0.4368 & 0.5413 & 0.6310 & \cellcolor{green!35} 0.6349 & 0.5674 & 0.5868 & 0.4443 \\
+openbookqa & \cellcolor{green!60} 0.4420 & 0.3680 & 0.3680 & 0.3720 & 0.3720 & \cellcolor{green!15} 0.3820 & 0.3300 & 0.3740 & 0.3820 & 0.3780 & 0.3640 & \cellcolor{green!35} 0.3860 & 0.3300 \\
+rte & \cellcolor{green!60} 0.6787 & 0.4693 & 0.4621 & 0.4693 & 0.4765 & 0.4910 & \cellcolor{green!35} 0.5199 & 0.4765 & 0.4621 & 0.4729 & 0.4765 & 0.4910 & \cellcolor{green!15} 0.5018 \\
+winogrande & \cellcolor{green!60} 0.7537 & 0.6425 & 0.6654 & \cellcolor{green!35} 0.6685 & 0.6496 & 0.6614 & 0.5730 & 0.6401 & \cellcolor{green!15} 0.6669 & 0.6622 & 0.6354 & 0.6543 & 0.5777 \\
+\midrule
+\textbf{Mean} & \cellcolor{green!60} 0.6953 & 0.5399 & \cellcolor{green!15} 0.5694 & 0.5615 & 0.5515 & 0.5589 & 0.4825 & 0.5425 & \cellcolor{green!35} 0.5737 & 0.5636 & 0.5462 & 0.5561 & 0.4847 \\
+\bottomrule
+\end{tabular}
+}
+\caption{google/gemma-7b, pruning, nsamples=1024, metric=acc\_norm,none}
+\end{table}

@@ -1,0 +1,23 @@
+\begin{table}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l|cccccccc}
+\toprule
+Task & \multicolumn{1}{c}{Original} & \multicolumn{7}{c}{unique\_tokens} \\
+\cmidrule(lr){3-9}
+ &  & arc\_challenge & boolq & hellaswag & openbookqa & rte & winogrande & winogrande\_arc\_challenge\_boolq\_hellaswag\_openbookqa\_rte \\
+\midrule
+arc\_challenge & \cellcolor{green!60} 0.5589 & 0.5094 & 0.5205 & \cellcolor{green!35} 0.5247 & 0.5009 & 0.5154 & 0.5119 & \cellcolor{green!15} 0.5247 \\
+arc\_easy & \cellcolor{green!60} 0.7976 & 0.7340 & 0.7353 & \cellcolor{green!35} 0.7407 & 0.7311 & 0.7315 & 0.7344 & \cellcolor{green!15} 0.7378 \\
+boolq & \cellcolor{green!60} 0.8541 & 0.8450 & 0.8492 & \cellcolor{green!15} 0.8495 & 0.8459 & 0.8480 & \cellcolor{green!35} 0.8511 & 0.8462 \\
+hellaswag & \cellcolor{green!60} 0.7954 & 0.7197 & 0.7186 & \cellcolor{green!15} 0.7219 & 0.7178 & \cellcolor{green!35} 0.7222 & 0.7180 & 0.7192 \\
+openbookqa & 0.4480 & \cellcolor{green!60} 0.4760 & 0.4680 & \cellcolor{green!15} 0.4700 & 0.4640 & 0.4640 & \cellcolor{green!35} 0.4720 & 0.4640 \\
+rte & \cellcolor{green!60} 0.7437 & 0.7112 & 0.7184 & \cellcolor{green!15} 0.7256 & \cellcolor{green!35} 0.7292 & 0.7220 & 0.7148 & 0.7148 \\
+winogrande & \cellcolor{green!60} 0.7356 & 0.6764 & \cellcolor{green!15} 0.6914 & 0.6819 & 0.6819 & 0.6882 & \cellcolor{green!35} 0.6922 & 0.6803 \\
+\midrule
+\textbf{Mean} & \cellcolor{green!60} 0.7047 & 0.6674 & \cellcolor{green!15} 0.6716 & \cellcolor{green!35} 0.6735 & 0.6672 & 0.6702 & 0.6706 & 0.6696 \\
+\bottomrule
+\end{tabular}
+}
+\caption{meta-llama/Llama-3.1-8B-Instruct, pruning, nsamples=128, metric=acc\_norm,none}
+\end{table}

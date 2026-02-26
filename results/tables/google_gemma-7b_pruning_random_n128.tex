@@ -1,0 +1,18 @@
+\begin{table}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l|cccccccccc}
+\toprule
+Task & \multicolumn{1}{c}{Original} & \multicolumn{6}{c}{COLA} & \multicolumn{3}{c}{random} \\
+\cmidrule(lr){3-8} \cmidrule(lr){9-11}
+Original & arc\_challenge & boolq & hellaswag & openbookqa & rte & winogrande & hellaswag & openbookqa & rte \\
+\midrule
+arc\_challenge & \cellcolor{green!60} 0.5384 & \cellcolor{green!15} 0.4181 & \cellcolor{green!35} 0.4326 & 0.4113 & 0.4121 & 0.4172 & 0.3200 & 0.4181 & 0.4096 & 0.3831 \\
+arc\_easy & \cellcolor{green!60} 0.8085 & 0.6919 & \cellcolor{green!35} 0.6999 & \cellcolor{green!15} 0.6923 & 0.6776 & 0.6877 & 0.5728 & 0.6848 & 0.6768 & 0.6486 \\
+hellaswag & \cellcolor{green!60} 0.8095 & 0.5838 & 0.6280 & \cellcolor{green!15} 0.6331 & 0.5663 & 0.6034 & 0.4375 & \cellcolor{green!35} 0.6333 & 0.5414 & 0.5576 \\
+openbookqa & \cellcolor{green!60} 0.4420 & \cellcolor{green!35} 0.3840 & 0.3700 & 0.3700 & 0.3680 & \cellcolor{green!15} 0.3780 & 0.3300 & 0.3720 & 0.3560 & 0.3660 \\
+\bottomrule
+\end{tabular}
+}
+\caption{google/gemma-7b, pruning, nsamples=128, metric=acc\_norm,none}
+\end{table}

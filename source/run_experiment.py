@@ -50,22 +50,26 @@ def get_existing_original_results(output_csv, model_name):
 
 
 def get_tokenized_data(dataset, tokenizer, dataset_name, max_length=128):
+    # Collect all texts first, then batch-tokenize for speed
+    texts = [get_text_from_item(item, dataset_name) for item in dataset]
     processed_dataset = []
-    for item in dataset:
-        text = get_text_from_item(item, dataset_name)
+    batch_size = 1000
+    for i in range(0, len(texts), batch_size):
+        batch_texts = texts[i:i+batch_size]
         encoded = tokenizer(
-            text,
+            batch_texts,
             truncation=True,
             max_length=max_length,
             padding="max_length",
             return_tensors="pt",
         )
-        processed_dataset.append(
-            {
-                "input_ids": encoded["input_ids"].squeeze(0),
-                "attention_mask": encoded["attention_mask"].squeeze(0),
-            }
-        )
+        for j in range(len(batch_texts)):
+            processed_dataset.append(
+                {
+                    "input_ids": encoded["input_ids"][j],
+                    "attention_mask": encoded["attention_mask"][j],
+                }
+            )
     return processed_dataset
 
 
@@ -194,7 +198,7 @@ def main():
 
     # Prepare calibration data base (tokenized) once
     log.info("Preparing base tokenized data for calibration...")
-    all_tokenized_data = []
+    all_tokenized_datasets = []  # List of lists, one per dataset (for coreset resampling)
     for d_name in args.datasets:
         raw_dataset = get_dataset(d_name)
         if raw_dataset is None:
@@ -208,7 +212,7 @@ def main():
         else:
             dataset = raw_dataset
         tokenized_data = get_tokenized_data(dataset, tokenizer, d_name)
-        all_tokenized_data.extend(tokenized_data)
+        all_tokenized_datasets.append(tokenized_data)
 
     calibration_type_map = {
         "most_similar": "prototype",
@@ -228,6 +232,7 @@ def main():
     }
 
     # 3. Loop through pruning types
+    sentence_transformer = None  # Lazy-loaded once, reused across pruning types
     for p_type in args.pruning_types:
         log.info(
             f"\n--- Starting process for {args.compression_type} type: {p_type} ---"
@@ -270,15 +275,15 @@ def main():
                 )
 
             # Prepare calibration for this specific type
-            calib_model = (
-                model
-                if p_type == "least_perplexity"
-                else SentenceTransformer("all-MiniLM-L12-v2", device=device)
-            )
+            calib_model = model if p_type == "least_perplexity" else None
+            if calib_model is None:
+                if sentence_transformer is None:
+                    sentence_transformer = SentenceTransformer("all-MiniLM-L12-v2", device=device)
+                calib_model = sentence_transformer
 
             calibration_data_dicts = prepare_calibration(
                 model=calib_model,
-                dataloader=[all_tokenized_data],
+                dataloader=all_tokenized_datasets,
                 nsamples=args.nsamples,
                 type=calibration_type_map[p_type],
                 distance="flatten",

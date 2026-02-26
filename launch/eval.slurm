@@ -11,50 +11,54 @@
 #SBATCH --mail-user=francescopio.monaco@unitn.it
 
 # Run as an array: one array task per (model, dataset)
-#SBATCH --array=0-17%5
+#SBATCH --array=0-41%7
 
 DATASET_PREF="--datasets"
-DATASETS=("winogrande" "arc_challenge" "boolq" "hellaswag" "openbookqa" "rte") 
+DATASETS=("winogrande" "arc_challenge" "boolq" "hellaswag" "openbookqa" "rte" "winogrande arc_challenge boolq hellaswag openbookqa rte") 
 MODEL_PREF="--model"
-MODELS=("google/gemma-7b" "Qwen/Qwen3-8B" "meta-llama/Llama-3.2-3B") #"microsoft/Phi-2"
+MODELS=("google/gemma-2-9b-it") #"microsoft/Phi-2" "Qwen/Qwen3-8B" "google/gemma-7b" "meta-llama/Llama-3.1-8B-Instruct"
 NUM_SAMPLES_PREFIX="--nsamples"
 SPARSITY_PREFIX="--sparsity"
-SPARSITY="0.5"
-NUM_SAMPLES=(16)
+SPARSITY="0.25"
+NUM_SAMPLES=(128)
 COMPRESSION_PREFIX="--compression_type"
 COMPRESSION_TYPE=("pruning" "quantization")
 PRUNING_PREFIX="--pruning_types"
-PRUNING_TYPES=("random" "unique_tokens" "most_similar" "least_perplexity" "distribution_matching")
+PRUNING_TYPES=("unique_tokens" "random" "most_similar" "least_perplexity" "distribution_matching" "words_dataset")
 
-# Select model and dataset based on the SLURM array task id
-# total tasks = len(MODELS) * len(DATASETS) = 3 * 6 = 18
+# Select model, dataset and pruning type based on the SLURM array task id
+# total tasks = len(MODELS) * len(DATASETS) * len(PRUNING_TYPES) = 1 * 7 * 6 = 42
+NUM_DATASETS=${#DATASETS[@]}
+NUM_PRUNING=${#PRUNING_TYPES[@]}
+
 TASK_ID=${SLURM_ARRAY_TASK_ID:-0}
-MODEL_INDEX=$((TASK_ID / 6))
-DATASET_INDEX=$((TASK_ID % 6))
+MODEL_INDEX=$((TASK_ID / (NUM_DATASETS * NUM_PRUNING)))
+REMAINING=$((TASK_ID % (NUM_DATASETS * NUM_PRUNING)))
+DATASET_INDEX=$((REMAINING / NUM_PRUNING))
+PRUNING_INDEX=$((REMAINING % NUM_PRUNING))
 
 MODEL=${MODELS[$MODEL_INDEX]}
 DATASET=${DATASETS[$DATASET_INDEX]}
+P_TYPE=${PRUNING_TYPES[$PRUNING_INDEX]}
 
 SUBTASK_ID=0
 for COMP in "${COMPRESSION_TYPE[@]}"; do
     for NSAMPLES in "${NUM_SAMPLES[@]}"; do
-        for P_TYPE in "${PRUNING_TYPES[@]}"; do
-            SUBTASK_ID=$((SUBTASK_ID + 1))
-            echo "================================================================"
-            echo "SUBTASK $SUBTASK_ID START: TaskID=$SLURM_ARRAY_TASK_ID, Model=$MODEL, Dataset=$DATASET"
-            echo "Config: Comp=$COMP, NSamples=$NSAMPLES, Pruning=$P_TYPE"
-            echo "================================================================"
-            
-            srun python source/run_experiment.py \
-                $DATASET_PREF "$DATASET" \
-                $MODEL_PREF "$MODEL" \
-                $NUM_SAMPLES_PREFIX "$NSAMPLES" \
-                $SPARSITY_PREFIX "$SPARSITY" \
-                $COMPRESSION_PREFIX "$COMP" \
-                $PRUNING_PREFIX "$P_TYPE"
-            
-            echo "SUBTASK $SUBTASK_ID FINISHED: $P_TYPE"
-            echo "----------------------------------------------------------------"
-        done
+        SUBTASK_ID=$((SUBTASK_ID + 1))
+        echo "================================================================"
+        echo "SUBTASK $SUBTASK_ID START: TaskID=$SLURM_ARRAY_TASK_ID, Model=$MODEL, Dataset=$DATASET"
+        echo "Config: Comp=$COMP, NSamples=$NSAMPLES, Pruning=$P_TYPE"
+        echo "================================================================"
+        
+        srun python source/run_experiment.py \
+            $DATASET_PREF $DATASET \
+            $MODEL_PREF "$MODEL" \
+            $NUM_SAMPLES_PREFIX "$NSAMPLES" \
+            $SPARSITY_PREFIX "$SPARSITY" \
+            $COMPRESSION_PREFIX "$COMP" \
+            $PRUNING_PREFIX "$P_TYPE"
+        
+        echo "SUBTASK $SUBTASK_ID FINISHED: $P_TYPE"
+        echo "----------------------------------------------------------------"
     done
 done

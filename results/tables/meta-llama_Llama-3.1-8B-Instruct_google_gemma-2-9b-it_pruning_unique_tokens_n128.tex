@@ -1,0 +1,34 @@
+\begin{table}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l|l|ccccccc|c|cccccccc|c|c}
+\toprule
+Model & Task & \multicolumn{1}{c}{Original} & \multicolumn{8}{c}{COLA} & \multicolumn{9}{c}{unique\_tokens} \\
+\cmidrule(lr){4-11} \cmidrule(lr){12-20}
+ & &  & arc\_challenge & boolq & hellaswag & openbookqa & rte & winogrande & \textbf{Mean} & \textbf{GMean} & arc\_challenge & boolq & hellaswag & openbookqa & rte & winogrande & winogrande\_arc\_challenge\_boolq\_hellaswag\_openbookqa\_rte & \textbf{Mean} & \textbf{GMean} \\
+\midrule
+\multirow{8}{*}{\textbf{Llama-3.1-8B-Instruct}} & arc\_challenge & 0.5589 & 0.5026 & 0.5102 & 0.5111 & 0.5000 & \cellcolor{green!15} 0.5205 & 0.4983 & 0.5071 & 0.9073 & 0.5094 & 0.5205 & \cellcolor{green!60} 0.5247 & 0.5009 & 0.5154 & 0.5119 & \cellcolor{green!35} 0.5247 & \textbf{0.5138} & \textbf{0.9192} \\
+ & arc\_easy & 0.7976 & 0.7315 & 0.7281 & 0.7311 & 0.7323 & \cellcolor{green!15} 0.7365 & 0.7319 & 0.7319 & 0.9177 & 0.7340 & 0.7353 & \cellcolor{green!60} 0.7407 & 0.7311 & 0.7315 & 0.7344 & \cellcolor{green!35} 0.7378 & \textbf{0.7345} & \textbf{0.9209} \\
+ & boolq & 0.8541 & 0.8437 & 0.8489 & 0.8428 & 0.8459 & 0.8459 & 0.8431 & 0.8451 & 0.9894 & 0.8450 & \cellcolor{green!15} 0.8492 & \cellcolor{green!35} 0.8495 & 0.8459 & 0.8480 & \cellcolor{green!60} 0.8511 & 0.8462 & \textbf{0.8481} & \textbf{0.9930} \\
+ & hellaswag & 0.7954 & 0.7202 & 0.7159 & \cellcolor{green!60} 0.7239 & 0.7160 & 0.7210 & 0.7195 & 0.7194 & 0.9045 & 0.7197 & 0.7186 & \cellcolor{green!15} 0.7219 & 0.7178 & \cellcolor{green!35} 0.7222 & 0.7180 & 0.7192 & \textbf{0.7197} & \textbf{0.9048} \\
+ & openbookqa & 0.4480 & \cellcolor{green!60} 0.4760 & 0.4620 & 0.4700 & 0.4660 & \cellcolor{green!15} 0.4720 & 0.4620 & 0.4680 & 1.0446 & \cellcolor{green!35} 0.4760 & 0.4680 & 0.4700 & 0.4640 & 0.4640 & 0.4720 & 0.4640 & \textbf{0.4690} & \textbf{1.0468} \\
+ & rte & 0.7437 & \cellcolor{green!60} 0.7329 & 0.7184 & 0.7148 & \cellcolor{green!15} 0.7256 & 0.7112 & 0.7256 & \textbf{0.7214} & \textbf{0.9700} & 0.7112 & 0.7184 & 0.7256 & \cellcolor{green!35} 0.7292 & 0.7220 & 0.7148 & 0.7148 & 0.7202 & 0.9684 \\
+ & winogrande & 0.7356 & 0.6756 & 0.6843 & 0.6835 & 0.6732 & 0.6867 & 0.6843 & 0.6813 & 0.9261 & 0.6764 & \cellcolor{green!35} 0.6914 & 0.6819 & 0.6819 & \cellcolor{green!15} 0.6882 & \cellcolor{green!60} 0.6922 & 0.6803 & \textbf{0.6853} & \textbf{0.9317} \\
+\cmidrule{2-20}
+ & \textbf{Mean} & 0.7047 & 0.6689 & 0.6668 & 0.6682 & 0.6656 & 0.6705 & 0.6664 & 0.6677 & 0.9514 & 0.6674 & \cellcolor{green!35} 0.6716 & \cellcolor{green!60} 0.6735 & 0.6672 & 0.6702 & \cellcolor{green!15} 0.6706 & 0.6696 & \textbf{0.6701} & \textbf{0.9550} \\
+\midrule
+\multirow{8}{*}{\textbf{gemma-2-9b-it}} & arc\_challenge & 0.5196 & 0.5094 & 0.5094 & 0.9803 & \cellcolor{green!15} 0.5162 & \cellcolor{green!60} 0.5213 & 0.5162 & 0.5119 & \cellcolor{green!35} 0.5196 & 0.5145 & 0.5162 & \textbf{0.5166} & \textbf{0.9942} \\
+ & arc\_easy & 0.6679 & 0.6658 & 0.6658 & 0.9968 & \cellcolor{green!60} 0.6780 & 0.6717 & \cellcolor{green!35} 0.6755 & 0.6713 & \cellcolor{green!15} 0.6734 & 0.6679 & 0.6705 & \textbf{0.6730} & \textbf{1.0075} \\
+ & boolq & 0.8859 & 0.8850 & 0.8850 & 0.9990 & \cellcolor{green!60} 0.8878 & \cellcolor{green!35} 0.8865 & 0.8859 & 0.8853 & \cellcolor{green!15} 0.8862 & 0.8862 & 0.8862 & \textbf{0.8863} & \textbf{1.0005} \\
+ & hellaswag & 0.6724 & \cellcolor{green!15} 0.6722 & \textbf{0.6722} & \textbf{0.9997} & \cellcolor{green!60} 0.6728 & 0.6719 & 0.6712 & \cellcolor{green!35} 0.6724 & 0.6711 & 0.6702 & 0.6715 & 0.6716 & 0.9988 \\
+ & openbookqa & 0.4520 & \cellcolor{green!60} 0.4700 & \textbf{0.4700} & \textbf{1.0398} & \cellcolor{green!15} 0.4640 & 0.4540 & \cellcolor{green!35} 0.4660 & 0.4600 & 0.4620 & 0.4620 & 0.4580 & 0.4613 & 1.0206 \\
+ & rte & 0.7834 & 0.7834 & 0.7834 & 1.0000 & \cellcolor{green!60} 0.7870 & \cellcolor{green!35} 0.7870 & \cellcolor{green!15} 0.7870 & 0.7798 & 0.7834 & 0.7834 & 0.7834 & \textbf{0.7846} & \textbf{1.0015} \\
+ & winogrande & 0.7040 & 0.6914 & 0.6914 & 0.9821 & \cellcolor{green!60} 0.7024 & 0.6890 & 0.6914 & 0.6875 & \cellcolor{green!15} 0.6922 & 0.6906 & \cellcolor{green!35} 0.6946 & \textbf{0.6922} & \textbf{0.9832} \\
+\cmidrule{2-15}
+ & \textbf{Mean} & 0.6693 & 0.6682 & 0.6682 & 0.9997 & \cellcolor{green!60} 0.6726 & 0.6688 & \cellcolor{green!35} 0.6705 & 0.6669 & \cellcolor{green!15} 0.6697 & 0.6678 & 0.6686 & \textbf{0.6694} & \textbf{1.0009} \\
+\bottomrule
+\end{tabular}
+}
+\caption{meta-llama/Llama-3.1-8B-Instruct, google/gemma-2-9b-it, pruning, nsamples=128, metric=acc\_norm,none}
+\label{tab:pruning_unique_tokens_n128}
+\end{table}

@@ -24,7 +24,7 @@ cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".cac
 memory = Memory(cache_dir, verbose=0)
 
 
-def embedd_data(dataset, model, device="cuda:0", batch_size=32):
+def embedd_data(dataset, model, device="cuda:0", batch_size=128, tokenizer=None):
     # Permetti di usare un sentence embedder opzionale
     sentence_embedder = None
     if hasattr(model, "encode"):
@@ -39,12 +39,24 @@ def embedd_data(dataset, model, device="cuda:0", batch_size=32):
                 t = item.get("sentence", item.get("text", ""))
                 if t == "":
                     t = item.get("question", item.get("prompt", item.get("code", "")))
+                # If still empty and item has input_ids, decode back to text
+                if t == "" and "input_ids" in item and tokenizer is not None:
+                    ids = item["input_ids"]
+                    if isinstance(ids, torch.Tensor):
+                        ids = ids.tolist()
+                    t = tokenizer.decode(ids, skip_special_tokens=True)
             elif isinstance(item, (list, tuple)):
-                # Se hai solo input_ids, non puoi decodificare senza tokenizer
-                t = None
+                # Se hai solo input_ids, prova a decodificare con tokenizer
+                if tokenizer is not None:
+                    ids = item[0] if len(item) > 0 else item
+                    if isinstance(ids, torch.Tensor):
+                        ids = ids.tolist()
+                    t = tokenizer.decode(ids, skip_special_tokens=True)
+                else:
+                    t = None
             else:
                 t = None
-            if t is not None:
+            if t is not None and t != "":
                 texts.append(t)
         # Usa il sentence embedder
         print("Embedding data with sentence embedder...", flush=True)
@@ -104,19 +116,21 @@ def cosine_similarity_vectorized(data):
         (data.shape[0], data.shape[0]), dtype=torch.float32, device=data.device
     )
 
-    for i in range(0, data.shape[0], 512):
-        end_i = min(i + 512, data.shape[0])
-        batch = data_normalized[i:end_i]
-        with torch.amp.autocast(
-            "cuda",
-        ):
+    with torch.amp.autocast("cuda"):
+        for i in range(0, data.shape[0], 2048):
+            end_i = min(i + 2048, data.shape[0])
+            batch = data_normalized[i:end_i]
             chunk = torch.matmul(batch, data_normalized.T)
-        similarity_matrix[i:end_i] = chunk
+            similarity_matrix[i:end_i] = chunk
 
     return similarity_matrix
 
 
 def get_cosine_similarity(last_hidden_state_array_torch, distance="flatten"):
+    if last_hidden_state_array_torch.numel() == 0:
+        print("WARNING: get_cosine_similarity received empty tensor, returning empty matrix.", flush=True)
+        return torch.zeros((0, 0), dtype=torch.float32)
+
     if distance == "flatten":
         Matrix_embeddings = last_hidden_state_array_torch.view(
             last_hidden_state_array_torch.shape[0], -1
@@ -155,6 +169,7 @@ def use_embedding_for_sampling(
     model_name="model",
     dataset_name="dataset",
     return_distribution=False,
+    tokenizer=None,
 ):
     calibration_data = []
     original_distributions = []
@@ -164,7 +179,10 @@ def use_embedding_for_sampling(
 
     for indice, dataset in enumerate(dataloader):
         print("\nDataset {}".format(indice), flush=True)
-        last_hidden_state_array_torch = embedd_data(dataset, model, device="cuda:0")
+        last_hidden_state_array_torch = embedd_data(dataset, model, device="cuda:0", tokenizer=tokenizer)
+        if last_hidden_state_array_torch.numel() == 0:
+            print(f"WARNING: Dataset {indice} produced empty embeddings, skipping.", flush=True)
+            continue
         # print("embedding done", flush=True)
         cosine_similarity_matrix = get_cosine_similarity(
             last_hidden_state_array_torch, distance=distance
@@ -454,9 +472,12 @@ def least_perplexity_sampling(
     original_distributions = []
     sample_distributions = []
 
-    for indice, dataset in enumerate(dataloader):
-        perplexities = []
+    loss_fn = torch.nn.CrossEntropyLoss(reduction='none')
+    ppl_batch_size = 8
 
+    for indice, dataset in enumerate(dataloader):
+        # Collect all input_ids first
+        all_input_ids = []
         for item in dataset:
             if isinstance(item, dict):
                 input_ids = item["input_ids"]
@@ -464,14 +485,27 @@ def least_perplexity_sampling(
                 input_ids = item[0]
             else:
                 input_ids = item
+            if not isinstance(input_ids, torch.Tensor):
+                input_ids = torch.tensor(input_ids)
+            all_input_ids.append(input_ids)
 
-            input_ids = input_ids.unsqueeze(0).to(model.device)
-
-            with torch.no_grad():
-                outputs = model(input_ids, labels=input_ids)
-                loss = outputs.loss
-                perplexity = torch.exp(loss).item()
-                perplexities.append(perplexity)
+        # Batch forward passes for perplexity
+        perplexities = []
+        with torch.no_grad():
+            for i in range(0, len(all_input_ids), ppl_batch_size):
+                batch_ids = torch.stack(all_input_ids[i:i+ppl_batch_size]).to(model.device)
+                outputs = model(batch_ids)
+                logits = outputs.logits
+                # Shift for causal LM loss
+                shift_logits = logits[:, :-1, :].contiguous()
+                shift_labels = batch_ids[:, 1:].contiguous()
+                per_token_loss = loss_fn(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1)
+                ).view(batch_ids.size(0), -1)
+                per_sample_loss = per_token_loss.mean(dim=1)
+                per_sample_ppl = torch.exp(per_sample_loss)
+                perplexities.extend(per_sample_ppl.cpu().tolist())
 
         perplexities_tensor = torch.tensor(perplexities)
 
@@ -852,31 +886,25 @@ def unique_tokens_sampling(dataloader, sample_per_dataset, tokenizer=None):
 
         # 3. Greedy selection to maximize coverage
         selected_indices = []
-        selected_indices_set = set()
         covered_concepts = set()
         nsamples = sample_per_dataset
+
+        # Maintain a set of eligible indices to avoid O(N) rebuild each iteration
+        eligible_set = set(range(len(all_items)))
 
         pbar = tqdm(total=nsamples, desc="Selecting samples")
         while len(selected_indices) < nsamples:
             best_idx = -1
             max_new = -1
 
-            # Search for the sentence adding most new concepts
-            # If candidates are too many, we can use a sample for speed, but let's try full search first
-            # unless it's extremely slow.
-
-            # Optimization: only consider items not yet selected
-            eligible_indices = [
-                i for i in range(len(all_items)) if i not in selected_indices_set
-            ]
-            if not eligible_indices:
+            if not eligible_set:
                 break
 
             # If the dataset is very large, subsample the search pool to speed up
-            search_pool = eligible_indices
-            if len(eligible_indices) > 2000:
-                # Still try to be smart: include some long sentences or just random
-                search_pool = np.random.choice(eligible_indices, 2000, replace=False)
+            if len(eligible_set) > 2000:
+                search_pool = np.random.choice(list(eligible_set), 2000, replace=False)
+            else:
+                search_pool = eligible_set
 
             for idx in search_pool:
                 new_concepts = sentence_concepts[idx] - covered_concepts
@@ -893,7 +921,7 @@ def unique_tokens_sampling(dataloader, sample_per_dataset, tokenizer=None):
                 break
 
             selected_indices.append(best_idx)
-            selected_indices_set.add(best_idx)
+            eligible_set.discard(best_idx)
             covered_concepts.update(sentence_concepts[best_idx])
             pbar.update(1)
         pbar.close()
@@ -1115,6 +1143,7 @@ def prepare_calibration(
             model_name=model_name,
             dataset_name=dataset_name,
             return_distribution=return_distribution,
+            tokenizer=tokenizer,
         )
         if return_distribution:
             calibration_data, original_dist, sample_dist = result
@@ -1201,7 +1230,7 @@ def prepare_calibration(
             pool = calibration_data
 
         # Embed the pool
-        pool_embeddings = embedd_data(pool, model, device="cuda:0")
+        pool_embeddings = embedd_data(pool, model, device="cuda:0", tokenizer=tokenizer)
 
         # If embeddings are (N, L, D), mean pool them
         if pool_embeddings.dim() == 3:

@@ -1,0 +1,23 @@
+\begin{table}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l|cccccccccccccc}
+\toprule
+Task & \multicolumn{1}{c}{Original} & \multicolumn{6}{c}{COLA} & \multicolumn{7}{c}{unique\_tokens} \\
+\cmidrule(lr){3-8} \cmidrule(lr){9-15}
+ &  & arc\_challenge & boolq & hellaswag & openbookqa & rte & winogrande & arc\_challenge & boolq & hellaswag & openbookqa & rte & winogrande & winogrande\_arc\_challenge\_boolq\_hellaswag\_openbookqa\_rte \\
+\midrule
+arc\_challenge & \cellcolor{green!60} 0.5648 & 0.5273 & \cellcolor{green!15} 0.5290 & 0.5239 & 0.5145 & 0.5009 & 0.4940 & 0.5282 & \cellcolor{green!35} 0.5324 & 0.5247 & 0.5068 & 0.4966 & 0.4872 & 0.5273 \\
+arc\_easy & \cellcolor{green!60} 0.8093 & 0.7673 & 0.7769 & 0.7757 & \cellcolor{green!15} 0.7782 & 0.7483 & 0.7635 & 0.7702 & \cellcolor{green!35} 0.7807 & 0.7748 & 0.7715 & 0.7584 & 0.7618 & 0.7765 \\
+boolq & \cellcolor{green!60} 0.8661 & 0.8404 & 0.8471 & 0.8450 & 0.8382 & 0.8434 & 0.8459 & 0.8398 & 0.8440 & 0.8468 & 0.8373 & 0.8474 & \cellcolor{green!15} 0.8483 & \cellcolor{green!35} 0.8508 \\
+hellaswag & \cellcolor{green!60} 0.7491 & 0.6605 & 0.6731 & 0.6738 & 0.6598 & 0.6642 & 0.6564 & 0.6618 & 0.6747 & \cellcolor{green!35} 0.6832 & 0.6647 & 0.6704 & 0.6577 & \cellcolor{green!15} 0.6778 \\
+openbookqa & \cellcolor{green!60} 0.4140 & 0.3720 & 0.3820 & 0.3740 & 0.3760 & 0.3760 & 0.3680 & 0.3700 & \cellcolor{green!35} 0.3940 & \cellcolor{green!15} 0.3840 & 0.3680 & 0.3600 & 0.3780 & 0.3700 \\
+rte & \cellcolor{green!60} 0.7834 & 0.7184 & 0.7256 & 0.7076 & \cellcolor{green!35} 0.7473 & 0.7184 & 0.7076 & 0.7112 & 0.7148 & 0.7184 & \cellcolor{green!15} 0.7329 & 0.7220 & 0.7220 & 0.7292 \\
+winogrande & \cellcolor{green!60} 0.6772 & \cellcolor{green!35} 0.6764 & \cellcolor{green!15} 0.6764 & 0.6669 & 0.6717 & 0.6756 & 0.6701 & 0.6725 & 0.6732 & 0.6740 & 0.6709 & 0.6630 & 0.6732 & 0.6709 \\
+\midrule
+\textbf{Mean} & \cellcolor{green!60} 0.6948 & 0.6518 & \cellcolor{green!15} 0.6586 & 0.6524 & 0.6551 & 0.6467 & 0.6436 & 0.6505 & \cellcolor{green!35} 0.6591 & 0.6580 & 0.6503 & 0.6454 & 0.6469 & 0.6575 \\
+\bottomrule
+\end{tabular}
+}
+\caption{Qwen/Qwen3-8B, pruning, nsamples=1024, metric=acc\_norm,none}
+\end{table}

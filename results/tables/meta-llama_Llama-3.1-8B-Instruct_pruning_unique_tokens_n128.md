@@ -1,0 +1,13 @@
+## meta-llama/Llama-3.1-8B-Instruct | pruning | nsamples=128 | metric=acc_norm,none (fallback: acc,none)
+
+| Task | Original | unique_tokens |  |  |  |  |  |  |
+| |  | arc_challenge | boolq | hellaswag | openbookqa | rte | winogrande | winogrande_arc_challenge_boolq_hellaswag_openbookqa_rte |
+|---|---|---|---|---|---|---|---|---|
+| arc_challenge | <span style="background-color:#1b5e20;color:white;padding:2px 4px">0.5589</span> | 0.5094 | 0.5205 | <span style="background-color:#4caf50;color:white;padding:2px 4px">0.5247</span> | 0.5009 | 0.5154 | 0.5119 | <span style="background-color:#a5d6a7;padding:2px 4px">0.5247</span> |
+| arc_easy | <span style="background-color:#1b5e20;color:white;padding:2px 4px">0.7976</span> | 0.7340 | 0.7353 | <span style="background-color:#4caf50;color:white;padding:2px 4px">0.7407</span> | 0.7311 | 0.7315 | 0.7344 | <span style="background-color:#a5d6a7;padding:2px 4px">0.7378</span> |
+| boolq | <span style="background-color:#1b5e20;color:white;padding:2px 4px">0.8541</span> | 0.8450 | 0.8492 | <span style="background-color:#a5d6a7;padding:2px 4px">0.8495</span> | 0.8459 | 0.8480 | <span style="background-color:#4caf50;color:white;padding:2px 4px">0.8511</span> | 0.8462 |
+| hellaswag | <span style="background-color:#1b5e20;color:white;padding:2px 4px">0.7954</span> | 0.7197 | 0.7186 | <span style="background-color:#a5d6a7;padding:2px 4px">0.7219</span> | 0.7178 | <span style="background-color:#4caf50;color:white;padding:2px 4px">0.7222</span> | 0.7180 | 0.7192 |
+| openbookqa | 0.4480 | <span style="background-color:#1b5e20;color:white;padding:2px 4px">0.4760</span> | 0.4680 | <span style="background-color:#a5d6a7;padding:2px 4px">0.4700</span> | 0.4640 | 0.4640 | <span style="background-color:#4caf50;color:white;padding:2px 4px">0.4720</span> | 0.4640 |
+| rte | <span style="background-color:#1b5e20;color:white;padding:2px 4px">0.7437</span> | 0.7112 | 0.7184 | <span style="background-color:#a5d6a7;padding:2px 4px">0.7256</span> | <span style="background-color:#4caf50;color:white;padding:2px 4px">0.7292</span> | 0.7220 | 0.7148 | 0.7148 |
+| winogrande | <span style="background-color:#1b5e20;color:white;padding:2px 4px">0.7356</span> | 0.6764 | <span style="background-color:#a5d6a7;padding:2px 4px">0.6914</span> | 0.6819 | 0.6819 | 0.6882 | <span style="background-color:#4caf50;color:white;padding:2px 4px">0.6922</span> | 0.6803 |
+| **Mean** | <span style="background-color:#1b5e20;color:white;padding:2px 4px">0.7047</span> | 0.6674 | <span style="background-color:#a5d6a7;padding:2px 4px">0.6716</span> | <span style="background-color:#4caf50;color:white;padding:2px 4px">0.6735</span> | 0.6672 | 0.6702 | 0.6706 | 0.6696 |

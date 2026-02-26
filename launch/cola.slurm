@@ -9,17 +9,17 @@
 #SBATCH --partition=long
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=francescopio.monaco@unitn.it
-#SBATCH --array=0-107%4  # 3 models * 6 datasets * 3 samples * 2 compression types = 108 tasks
+#SBATCH --array=0-71%5  # 2 models * 6 datasets * 3 samples * 2 compression types = 72 tasks
 
 #conda activate prun
 
 DATASET_PREF="--datasets"
 DATASETS=("winogrande" "arc_challenge" "boolq" "hellaswag" "openbookqa" "rte")
 MODEL_PREF="--model"
-MODELS=("google/gemma-7b" "Qwen/Qwen3-8B" "meta-llama/Llama-3.2-3B")
+MODELS=("meta-llama/Llama-3.1-8B-Instruct" "google/gemma-2-9b-it") # "google/gemma-7b" "Qwen/Qwen3-8B" "meta-llama/Llama-3.2-3B")
 NUM_SAMPLES_PREFIX="--nsamples"
 SPARSITY_PREFIX="--sparsity"
-SPARSITY="0.5"
+SPARSITY="0.25"
 NUM_SAMPLES=(128 512 1024)
 COMPRESSION_PREF="--compression_type"
 COMPRESSION_TYPES=("pruning" "quantization")

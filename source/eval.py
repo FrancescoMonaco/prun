@@ -9,6 +9,21 @@ logging.basicConfig(level=logging.INFO, format=FORMAT, datefmt=DATE_FORMAT)
 log = logging.getLogger(__name__)
 
 
+def _model_supports_system_role(tokenizer):
+    """Check if the model's chat template supports the system role."""
+    try:
+        tokenizer.apply_chat_template(
+            [
+                {"role": "system", "content": "test"},
+                {"role": "user", "content": "test"},
+            ],
+            tokenize=False,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def evaluate_model(
     model_name,
     model,
@@ -55,10 +70,23 @@ def evaluate_model(
     # Wrap the model and tokenizer
     hflm_model = HFLM(pretrained=model, tokenizer=tokenizer, batch_size=8)
 
+    # Some models (e.g. Gemma) do not support the system role in their chat template.
+    # Detect this and disable the system instruction to avoid errors.
+    supports_system = _model_supports_system_role(tokenizer)
+    if supports_system:
+        log.info("Model supports system role, using chat template with system instruction.")
+        system_instruction = "You are a helpful assistant."
+    else:
+        log.info("Model does NOT support system role, using chat template without system instruction.")
+        system_instruction = None
+
     results = simple_evaluate(
         model=hflm_model,
         tasks=task_list,
-        batch_size=8,
+        apply_chat_template=True,
+        system_instruction=system_instruction,
+        batch_size=None,
+        check_integrity=False,
         device=device,
     )
     return results
