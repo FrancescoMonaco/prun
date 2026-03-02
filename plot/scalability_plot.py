@@ -9,30 +9,29 @@ import argparse
 import os
 import pandas as pd
 import numpy as np
-import matplotlib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+import seaborn as sns
 
-matplotlib.use("Agg")
+mpl.rcParams.update(
+        {
+            #"text.usetex": True,
+            #"text.latex.preamble": r"\usepackage{siunitx} \usepackage{sansmath} \sansmath",
+            "font.size": 12,
+            "axes.titlesize": 12,
+            "axes.labelsize": 11,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 15,
+            "legend.title_fontsize": 11,
+            "figure.titlesize": 12,
+            "axes.spines.right": False, # Disable top and left spines by default (Tufte style)
+            "axes.spines.top": False,
+            
+        }
+    )
 
-# ── Publication-quality defaults ────────────────────────────────────────────────
-plt.rcParams.update(
-    {
-        "font.size": 12,
-        "axes.titlesize": 12,
-        "axes.labelsize": 11,
-        "xtick.labelsize": 10,
-        "ytick.labelsize": 10,
-        "legend.fontsize": 15,
-        "legend.title_fontsize": 11,
-        "figure.titlesize": 12,
-        "font.family": "serif",
-        "text.usetex": False,
-        "axes.grid": True,
-        "grid.alpha": 0.3,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-    }
-)
+sns.set_theme(palette="muted", style="white", font_scale=1.5)
 
 # ── Consistent palette ──────────────────────────────────────────────────────────
 OURS_COLOR = "#2ca02c"
@@ -60,188 +59,126 @@ def _size_tag(name: str) -> str:
     return name.split("/")[-1]
 
 
-def plot_scalability(df: pd.DataFrame, output_dir: str):
+def plot_all_in_one(df: pd.DataFrame, output_dir: str):
     """
-    Produce one figure per dataset.
-    X-axis = number of samples in the pool (n_used).
-    Y-axis = total selection time (s).
-    One line for "ours", one line per COLA model.
+    Single figure: all datasets on the same axes.
+    X-axis  = fraction of the dataset.
+    Y-axis  = total selection time (s).
+    Colors  = method / model  (Ours, COLA-3B, COLA-11B, COLA-70B).
+    Markers = dataset.
     """
-    datasets = df["dataset"].unique()
+    from matplotlib.lines import Line2D
+
+    datasets = sorted(df["dataset"].unique())
+
+    # One marker per dataset
+    _marker_pool = ["o", "s", "^", "D", "v", "p", "h", "*", "X", "+"]
+    dataset_markers = {
+        ds: _marker_pool[i % len(_marker_pool)] for i, ds in enumerate(datasets)
+    }
+
+    fig, (ax, ax_legend) = plt.subplots(1, 2, figsize=(10, 5), gridspec_kw={"width_ratios": [4, 1]})
+
+    # Track which method/model keys have already been added to the legend
+    method_legend: dict = {}
 
     for ds in datasets:
-        sub = df[df["dataset"] == ds].copy()
-
-        fig, ax = plt.subplots(figsize=(5.5, 4))
+        sub = df[df["dataset"] == ds]
+        mkr = dataset_markers[ds]
 
         # ── Our method ──
-        ours = sub[sub["method"] == "ours"].sort_values("n_used")
+        ours = sub[sub["method"] == "ours"].sort_values("fraction")
         if not ours.empty:
-            ax.plot(
-                ours["n_used"],
+            key = "Ours (model-free)"
+            (line,) = ax.plot(
+                ours["fraction"],
                 ours["total_time_s"],
-                marker=OURS_MARKER,
+                marker=mkr,
                 color=OURS_COLOR,
-                linewidth=2,
+                linewidth=1.5,
                 markersize=7,
-                label="Ours (model-free)",
+                linestyle="-",
+                label="_nolegend_",
                 zorder=5,
             )
+            if key not in method_legend:
+                method_legend[key] = line
 
         # ── COLA models ──
         cola = sub[sub["method"] == "cola"]
         for model_name, grp in cola.groupby("model"):
-            grp = grp.sort_values("n_used")
+            grp = grp.sort_values("fraction")
             tag = _size_tag(model_name)
             color = COLA_PALETTE.get(tag, "#9467bd")
-            marker = COLA_MARKERS.get(tag, "o")
-            label = f"COLA – {_short_model_label(model_name)}"
+            key = f"COLA \u2013 {_short_model_label(model_name)}"
 
-            ax.plot(
-                grp["n_used"],
+            (line,) = ax.plot(
+                grp["fraction"],
                 grp["total_time_s"],
-                marker=marker,
+                marker=mkr,
                 color=color,
-                linewidth=2,
+                linewidth=1.5,
                 markersize=7,
-                label=label,
+                linestyle="-",
+                label="_nolegend_",
                 zorder=4,
             )
+            if key not in method_legend:
+                method_legend[key] = line
 
-        ax.set_xlabel("Pool size (number of samples)")
-        ax.set_ylabel("Total selection time (s)")
-        ax.set_title(f"Scalability — {ds}")
-        ax.legend(frameon=True, fancybox=False, edgecolor="0.8")
+    # ── Build two-part legend ──────────────────────────────────────────────────
+    # Part 1: colors → methods/models
+    color_handles = list(method_legend.values())
+    color_labels = list(method_legend.keys())
 
-        fig.tight_layout()
-        out_path = os.path.join(output_dir, f"scalability_{ds}.pdf")
-        fig.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        print(f"Saved {out_path}")
+    # Part 2: markers → datasets  (neutral gray line so only the shape reads)
+    marker_handles = [
+        Line2D(
+            [0], [0],
+            marker=dataset_markers[ds],
+            color="0.4",
+            linestyle="-",
+            markersize=7,
+            linewidth=1.5,
+            label=ds,
+        )
+        for ds in datasets
+    ]
 
+    # Separator entry (invisible) between the two groups
+    sep = Line2D([], [], linestyle="none", label="")
 
-def plot_combined(df: pd.DataFrame, output_dir: str):
-    """
-    Single figure with one subplot per dataset.
-    """
-    datasets = sorted(df["dataset"].unique())
-    n = len(datasets)
-    cols = min(n, 3)
-    rows = int(np.ceil(n / cols))
+    all_handles = color_handles + [sep] + marker_handles
+    all_labels = color_labels + [""] + datasets
 
-    fig, axes = plt.subplots(rows, cols, figsize=(5.5 * cols, 4 * rows), squeeze=False)
-    axes_flat = axes.flatten()
-
-    for idx, ds in enumerate(datasets):
-        ax = axes_flat[idx]
-        sub = df[df["dataset"] == ds]
-
-        # Our method
-        ours = sub[sub["method"] == "ours"].sort_values("n_used")
-        if not ours.empty:
-            ax.plot(
-                ours["n_used"],
-                ours["total_time_s"],
-                marker=OURS_MARKER,
-                color=OURS_COLOR,
-                linewidth=2,
-                markersize=7,
-                label="Ours (model-free)",
-                zorder=5,
-            )
-
-        # COLA models
-        cola = sub[sub["method"] == "cola"]
-        for model_name, grp in cola.groupby("model"):
-            grp = grp.sort_values("n_used")
-            tag = _size_tag(model_name)
-            color = COLA_PALETTE.get(tag, "#9467bd")
-            marker = COLA_MARKERS.get(tag, "o")
-            label = f"COLA – {_short_model_label(model_name)}"
-
-            ax.plot(
-                grp["n_used"],
-                grp["total_time_s"],
-                marker=marker,
-                color=color,
-                linewidth=2,
-                markersize=7,
-                label=label,
-                zorder=4,
-            )
-
-        ax.set_xlabel("Pool size")
-        ax.set_ylabel("Time (s)")
-        ax.set_title(ds)
-
-    # Remove unused subplots
-    for idx in range(n, len(axes_flat)):
-        fig.delaxes(axes_flat[idx])
-
-    # Single shared legend
-    handles, labels = axes_flat[0].get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="upper center",
-        ncol=min(len(handles), 4),
+    # Put legend in the right subfigure
+    ax_legend.axis("off")
+    leg = ax_legend.legend(
+        all_handles,
+        all_labels,
         frameon=True,
-        fancybox=False,
         edgecolor="0.8",
-        bbox_to_anchor=(0.5, 1.05),
+        loc="center left",
+        ncol=1,
+        fontsize=10,
+        borderaxespad=0.0,
     )
+    for lh in leg.legend_handles:
+        lh.set_alpha(1)
 
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
-    out_path = os.path.join(output_dir, "scalability_combined.pdf")
+    ax.set_xlabel("Fraction of dataset")
+    ax.set_ylabel("Total selection time (s)")
+    ax.set_yscale("log")
+    ax.minorticks_off()
+    ax.set_title("Scalability: selection time vs. dataset fraction")
+    # Tufte styling, left axis spanning only along our max min time range
+    sns.despine(ax=ax)
+    ax.spines["left"].set_bounds(df[df["method"] == "ours"]["total_time_s"].min(), 1.5 * df[df["method"] == "ours"]["total_time_s"].max())
+    fig.tight_layout()
+    out_path = os.path.join(output_dir, "scalability_all.pdf")
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved {out_path}")
-
-
-def plot_breakdown(df: pd.DataFrame, output_dir: str):
-    """
-    Stacked bar chart: tokenization vs selection time, grouped by method and pool fraction.
-    One figure per dataset.
-    """
-    datasets = df["dataset"].unique()
-
-    for ds in datasets:
-        sub = df[df["dataset"] == ds].copy()
-        sub["label"] = sub.apply(
-            lambda r: "Ours" if r["method"] == "ours" else f"COLA {_size_tag(r['model'])}",
-            axis=1,
-        )
-
-        methods = sub["label"].unique()
-        fractions = sorted(sub["fraction"].unique())
-        n_methods = len(methods)
-        x = np.arange(len(fractions))
-        width = 0.8 / n_methods
-
-        fig, ax = plt.subplots(figsize=(6, 4))
-
-        for i, method in enumerate(methods):
-            m_data = sub[sub["label"] == method].sort_values("fraction")
-            tok = m_data["tokenization_time_s"].values
-            sel = m_data["selection_time_s"].values
-
-            offset = x + (i - n_methods / 2 + 0.5) * width
-
-            ax.bar(offset, tok, width, label=f"{method} – tokenization", alpha=0.7)
-            ax.bar(offset, sel, width, bottom=tok, label=f"{method} – selection", alpha=0.9)
-
-        ax.set_xticks(x)
-        ax.set_xticklabels([f"{int(f*100)}%" for f in fractions])
-        ax.set_xlabel("Fraction of dataset")
-        ax.set_ylabel("Time (s)")
-        ax.set_title(f"Time breakdown — {ds}")
-        ax.legend(fontsize=8, frameon=True, fancybox=False, edgecolor="0.8")
-
-        fig.tight_layout()
-        out_path = os.path.join(output_dir, f"scalability_breakdown_{ds}.pdf")
-        fig.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        print(f"Saved {out_path}")
 
 
 # ── main ─────────────────────────────────────────────────────────────────────────
@@ -265,6 +202,4 @@ if __name__ == "__main__":
     df = pd.read_csv(args.input)
     os.makedirs(args.output_dir, exist_ok=True)
 
-    plot_scalability(df, args.output_dir)
-    plot_combined(df, args.output_dir)
-    plot_breakdown(df, args.output_dir)
+    plot_all_in_one(df, args.output_dir)
