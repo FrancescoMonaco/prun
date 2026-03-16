@@ -1,633 +1,529 @@
 #!/usr/bin/env python3
 """
-Generate comparison tables (Markdown + LaTeX) for COLA vs. our pruning methods.
+Generate a LaTeX comparison table: COLA (baseline) vs. a selected sampling
+strategy.  The table is oriented with **evaluation tasks as rows** and
+**calibration-dataset groups as columns**, making it longer and narrower –
+better suited for a two-column paper layout.
 
-Usage:
-    python3 generate_table.py --compression_type pruning --pruning_type random \
-                              --nsamples 128 --model google/gemma-7b meta-llama/Llama-2-7b
+Usage example
+─────────────
+    python3 generate_table.py \
+        --compression_type pruning \
+        --pruning_type words_dataset \
+        --model meta-llama/Llama-3.1-8B-Instruct google/gemma-2-9b-it
 
-    Multiple models are placed in the same table as separate macro-row groups.
-    Each model group ends with a Mean row computed over that model's tasks (row-wise mean).
+Calibration-dataset groups
+──────────────────────────
+  (i)   Language Modeling         : wikitext, c4, pile
+  (ii)  Mathematical Reasoning    : gsm8k, svamp
+  (iii) Commonsense Reasoning & QA: winogrande, openbookqa
+  (iv)  NLI                       : rte, anli_r1
+  (v)   Knowledge & Translation   : mmlu, wmt14
 
-    For cola_results_new.csv the pruning_type column is always "cola", so the
-    --pruning_type flag selects only from experiment_results_new.csv.
+Highlighting
+────────────
+  • Per-task rows: top-3 values across COLA + Ours calib-group columns
+    are highlighted with \\ulc{value}{foresta} (1st), foresta!70 (2nd),
+    foresta!40 (3rd).
+  • Mean / Geo% columns: the higher value between COLA and Ours is bolded.
 """
 
 import argparse
 import math
 import sys
+from collections import OrderedDict
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-# ── Paths ────────────────────────────────────────────────────────────────────
-SCRIPT_DIR = Path(__file__).resolve().parent
-COLA_CSV = SCRIPT_DIR / "results" / "cola_results_new.csv"
-EXP_CSV  = SCRIPT_DIR / "results" / "experiment_results_new.csv"
+# ── Paths ─────────────────────────────────────────────────────────────────────
+SCRIPT_DIR    = Path(__file__).resolve().parent
+COLA_CSV      = SCRIPT_DIR / "results" / "cola_experiments.csv"
+EXP_CSV       = SCRIPT_DIR / "results" / "experiment_results_new.csv"
+COLA_2SSP_CSV = SCRIPT_DIR / "results" / "2ssp_cola_experiment_results.csv"
+EXP_2SSP_CSV  = SCRIPT_DIR / "results" / "2ssp_experiment_results.csv"
 
-METRIC_PREFERRED = "acc_norm,none"  # prefer normalised accuracy
-METRIC_FALLBACK  = "acc,none"       # fall back for tasks w/o acc_norm
+# ── Constants ─────────────────────────────────────────────────────────────────
+METRIC_ACC_NORM = "acc_norm,none"
+METRIC_ACC      = "acc,none"
+METRIC_GSM8K    = "exact_match,flexible-extract"
 
-# Calibration datasets excluded from our method's row-mean / row-gmean
-EXCLUDED_FROM_EXP_MEAN = {"winogrande_arc_challenge_boolq_hellaswag_openbookqa_rte"}
+TASKS_WITH_NORM = {"arc_challenge", "arc_easy", "hellaswag", "openbookqa"}
 
-# Sentinel key pairs for (COLA, our method) mean columns – used for boldening
-MEAN_SENTINEL_PAIRS = [
-    ("__cola_mean__",  "__exp_mean__"),
-    ("__cola_gmean__", "__exp_gmean__"),
+# Evaluation tasks (rows)
+EVAL_TASKS = [
+    "arc_challenge", "arc_easy", "boolq", "hellaswag",
+    "winogrande", "gsm8k", "mmlu", "openbookqa", "rte", "anli_r1",
 ]
 
-# All aggregate/sentinel keys – excluded from top-3 green coloring
-AGGREGATE_SENTINELS = frozenset({
-    "__original__",
-    "__cola_mean__", "__cola_gmean__",
-    "__exp_mean__",  "__exp_gmean__",
-})
+TASK_DISPLAY = {
+    "arc_challenge": "ARC-C",
+    "arc_easy":      "ARC-E",
+    "boolq":         "BoolQ",
+    "hellaswag":     "HellaSwag",
+    "winogrande":    "WinoGr.",
+    "gsm8k":         "GSM8k",
+    "mmlu":          "MMLU",
+    "openbookqa":    "OBQA",
+    "rte":           "RTE",
+    "anli_r1":       "ANLI",
+}
+
+# Calibration-dataset groups (columns)
+CALIB_GROUPS = OrderedDict([
+    ("(i)",   ["wikitext", "c4", "pile"]),
+    ("(ii)",  ["gsm8k", "svamp"]),
+    ("(iii)", ["winogrande", "openbookqa"]),
+    ("(iv)",  ["rte", "anli_r1"]),
+    ("(v)",   ["mmlu", "wmt14"]),
+])
+N_GROUPS = len(CALIB_GROUPS)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _metric_for(task: str) -> str:
+    if task == "gsm8k":
+        return METRIC_GSM8K
+    return METRIC_ACC_NORM if task in TASKS_WITH_NORM else METRIC_ACC
 
 
-def _gmean_normalized(scores: list, original: float) -> float:
-    """
-    Normalized geometric mean: gmean(s_i / original) for each score s_i.
-    Values <= 0 or NaN are skipped. Returns NaN if no valid scores or original <= 0.
-    """
-    if not original or math.isnan(original) or original <= 0:
-        return float("nan")
-    ratios = [
-        float(s) / original
-        for s in scores
-        if not math.isnan(float(s)) and float(s) > 0
-    ]
-    if not ratios:
-        return float("nan")
-    return math.exp(sum(math.log(r) for r in ratios) / len(ratios))
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-def _pick_metric(df: pd.DataFrame, task_col: str = "task") -> pd.DataFrame:
-    """Keep acc_norm,none rows where available; fall back to acc,none."""
-    preferred = df[df["metric"] == METRIC_PREFERRED]
-    fallback  = df[df["metric"] == METRIC_FALLBACK]
-    tasks_with_preferred = set(preferred[task_col].unique())
-    fallback_only = fallback[~fallback[task_col].isin(tasks_with_preferred)]
-    return pd.concat([preferred, fallback_only], ignore_index=True)
+def _escape(s: str) -> str:
+    for ch in ("%", "#", "$"):
+        s = s.replace(ch, "\\" + ch)
+    s = s.replace("_", r"\_")
+    return s
 
 
-def load_cola(compression_type: str, nsamples: int, model: str) -> pd.DataFrame:
-    """Return a pivot DataFrame (task × calibration_dataset) for COLA values."""
-    df = pd.read_csv(COLA_CSV, header=None)
-    df.columns = [
-        "task", "metric", "value", "model",
-        "compression_type", "pruning_type",
-        "nsamples", "sparsity", "calibration_datasets",
-    ]
-    mask = (
-        (df["compression_type"] == compression_type)
-        & (df["nsamples"] == nsamples)
-        & (df["model"] == model)
-    )
-    sub = _pick_metric(df.loc[mask])
-    sub = sub[["task", "calibration_datasets", "value"]].copy()
-    if sub.empty:
-        return sub
-    pivot = sub.pivot(index="task", columns="calibration_datasets", values="value")
-    return pivot
-
-
-def load_experiment(
-    compression_type: str, pruning_type: str, nsamples: int, model: str
-) -> tuple[pd.DataFrame, pd.Series]:
-    """Return (pivot of pruned_value, series of original_value) indexed by task."""
-    df = pd.read_csv(EXP_CSV)
-    mask = (
-        (df["compression_type"] == compression_type)
-        & (df["pruning_type"] == pruning_type)
-        & (df["nsamples"] == nsamples)
-        & (df["model"] == model)
-    )
-    sub = _pick_metric(df.loc[mask])
-    sub = sub[["task", "calibration_datasets", "original_value", "pruned_value"]].copy()
-    if sub.empty:
-        return pd.DataFrame(), pd.Series(dtype=float)
-
-    # Original value should be the same across calibration_datasets per task
-    originals = sub.groupby("task")["original_value"].first()
-
-    pivot = sub.pivot(index="task", columns="calibration_datasets", values="pruned_value")
-    return pivot, originals
-
-
-def build_table(
-    compression_type: str,
-    pruning_type: str,
-    nsamples: int,
-    model: str,
-) -> tuple[list[str], pd.DataFrame, list[str], list[str]]:
-    """
-    Build the combined table.
-
-    Returns
-    -------
-    tasks : list[str]          – row labels
-    table : pd.DataFrame       – (n_tasks × n_cols) numeric values
-    col_headers : list[str]    – first-level column names
-    group_labels : list[str]   – macro-group each column belongs to
-                                 ("Original", "COLA", pruning_type)
-    """
-    cola_pivot = load_cola(compression_type, nsamples, model)
-    exp_pivot, originals = load_experiment(compression_type, pruning_type, nsamples, model)
-
-    if exp_pivot.empty:
-        print(f"[ERROR] No experiment data for {model}, {compression_type}, "
-              f"{pruning_type}, nsamples={nsamples}", file=sys.stderr)
-        sys.exit(1)
-
-    tasks = sorted(exp_pivot.index)
-    cola_calib_ds = sorted(cola_pivot.columns) if not cola_pivot.empty else []
-    exp_calib_ds  = sorted(exp_pivot.columns)
-
-    # Assemble columns – use unique internal keys to avoid duplicate names
-    col_keys: list[str] = []      # unique internal column identifiers
-    col_display: list[str] = []   # display names (calibration dataset or "Original")
-    group_labels: list[str] = []
-    rows: dict[str, list[float]] = {t: [] for t in tasks}
-
-    # 1) Original column
-    col_keys.append("__original__")
-    col_display.append("Original")
-    group_labels.append("Original")
-    for t in tasks:
-        rows[t].append(originals.get(t, float("nan")))
-
-    # 2) COLA columns + row-mean
-    for cd in cola_calib_ds:
-        col_keys.append(f"cola__{cd}")
-        col_display.append(cd)
-        group_labels.append("COLA")
-        for t in tasks:
-            val = cola_pivot.at[t, cd] if (t in cola_pivot.index and cd in cola_pivot.columns) else float("nan")
-            rows[t].append(val)
-    # COLA row-mean and row-gmean columns
-    col_keys.append("__cola_mean__")
-    col_display.append("Mean")
-    group_labels.append("COLA")
-    for t in tasks:
-        vals = [
-            cola_pivot.at[t, cd]
-            for cd in cola_calib_ds
-            if t in cola_pivot.index and cd in cola_pivot.columns
-        ]
-        rows[t].append(float(pd.Series(vals, dtype=float).mean()) if vals else float("nan"))
-    col_keys.append("__cola_gmean__")
-    col_display.append("GMean")
-    group_labels.append("COLA")
-    for t in tasks:
-        scores = [
-            cola_pivot.at[t, cd]
-            for cd in cola_calib_ds
-            if t in cola_pivot.index and cd in cola_pivot.columns
-        ]
-        orig = float(originals.get(t, float("nan")))
-        rows[t].append(_gmean_normalized(scores, orig))
-
-    # 3) Our method columns + row-mean + row-gmean (excluding EXCLUDED_FROM_EXP_MEAN)
-    for cd in exp_calib_ds:
-        col_keys.append(f"exp__{cd}")
-        col_display.append(cd)
-        group_labels.append(pruning_type)
-        for t in tasks:
-            val = exp_pivot.at[t, cd] if (t in exp_pivot.index and cd in exp_pivot.columns) else float("nan")
-            rows[t].append(val)
-    exp_mean_ds = [cd for cd in exp_calib_ds if cd not in EXCLUDED_FROM_EXP_MEAN]
-    col_keys.append("__exp_mean__")
-    col_display.append("Mean")
-    group_labels.append(pruning_type)
-    for t in tasks:
-        vals = [
-            exp_pivot.at[t, cd]
-            for cd in exp_mean_ds
-            if t in exp_pivot.index and cd in exp_pivot.columns
-        ]
-        rows[t].append(float(pd.Series(vals, dtype=float).mean()) if vals else float("nan"))
-    col_keys.append("__exp_gmean__")
-    col_display.append("GMean")
-    group_labels.append(pruning_type)
-    for t in tasks:
-        scores = [
-            exp_pivot.at[t, cd]
-            for cd in exp_mean_ds
-            if t in exp_pivot.index and cd in exp_pivot.columns
-        ]
-        orig = float(originals.get(t, float("nan")))
-        rows[t].append(_gmean_normalized(scores, orig))
-
-    table = pd.DataFrame(rows, index=col_keys).T
-    table.index.name = "task"
-    return tasks, table, col_display, group_labels
-
-
-def build_multi_table(
-    compression_type: str,
-    pruning_type: str,
-    nsamples: int,
-    models: list[str],
-) -> tuple[
-    dict[str, list[str]],
-    dict[str, pd.DataFrame],
-    dict[str, list[str]],
-    dict[str, list[str]],
-    list[str],
-    list[str],
-]:
-    """
-    Build per-model tables, each with its own column schema.
-
-    Returns
-    -------
-    model_tasks        : {model: [task, ...]}
-    model_tables       : {model: pd.DataFrame}
-    model_col_headers  : {model: [display_header, ...]}
-    model_group_labels : {model: [group_label, ...]}
-    first_col_headers  : col_headers of the first model (for table header rendering)
-    first_group_labels : group_labels of the first model
-    """
-    model_tasks: dict[str, list[str]] = {}
-    model_tables: dict[str, pd.DataFrame] = {}
-    model_col_headers: dict[str, list[str]] = {}
-    model_group_labels: dict[str, list[str]] = {}
-    first_col_headers: list[str] = []
-    first_group_labels: list[str] = []
-
-    for model in models:
-        tasks, table, ch, gl = build_table(compression_type, pruning_type, nsamples, model)
-        model_tasks[model] = tasks
-        model_tables[model] = table
-        model_col_headers[model] = ch
-        model_group_labels[model] = gl
-        if not first_col_headers:
-            first_col_headers = ch
-            first_group_labels = gl
-
-    return model_tasks, model_tables, model_col_headers, model_group_labels, first_col_headers, first_group_labels
-
-
-# ── Top-3 highlighting logic ────────────────────────────────────────────────
-
-def top3_indices(row: pd.Series) -> list[int]:
-    """Return positional indices of the top 3 values (descending), skipping aggregate columns."""
-    valid = [
-        (i, v) for i, (k, v) in enumerate(zip(row.index, row))
-        if pd.notna(v) and k not in AGGREGATE_SENTINELS
-    ]
-    if not valid:
-        return []
-    valid.sort(key=lambda x: x[1], reverse=True)
-    return [idx for idx, _ in valid[:3]]
-
-
-# Gold / Silver / Bronze in green shades for markdown
-GREEN_BG_MD = [
-    '<span style="background-color:#1b5e20;color:white;padding:2px 4px">{v}</span>',   # dark green
-    '<span style="background-color:#4caf50;color:white;padding:2px 4px">{v}</span>',   # green
-    '<span style="background-color:#a5d6a7;padding:2px 4px">{v}</span>',               # light green
-]
-
-LATEX_GREEN = [
-    r"\cellcolor{green!60}",   # 1st
-    r"\cellcolor{green!35}",   # 2nd
-    r"\cellcolor{green!15}",   # 3rd
-]
-
-
-def fmt(v: float) -> str:
-    if pd.isna(v):
+def _fmt(v, pct: bool = False) -> str:
+    if v is None or (isinstance(v, float) and math.isnan(v)):
         return "--"
+    if pct:
+        return f"{v:.1f}"
     return f"{v:.4f}"
 
 
-def _apply_top3_md(cells: list[str], row: pd.Series) -> list[str]:
-    """Return cells with green-shade HTML applied to the top-3 values."""
-    top3 = top3_indices(row)
-    result = []
-    for ci, s in enumerate(cells):
-        if ci in top3:
-            s = GREEN_BG_MD[top3.index(ci)].format(v=s)
-        result.append(s)
-    return result
+def _ulc(formatted: str, rank: int) -> str:
+    """Wrap a formatted value in \\ulc{...}{color} for top-3 highlighting."""
+    color = {0: "foresta", 1: "foresta!70", 2: "foresta!40"}[rank]
+    return r"\ulc{" + formatted + "}{" + color + "}"
 
 
-def _bold_winners(cells: list[str], row: pd.Series, latex: bool = False) -> list[str]:
-    """For each (cola_key, exp_key) sentinel pair, bold the cell with the higher value."""
-    key_to_pos = {k: i for i, k in enumerate(row.index)}
-    result = list(cells)
-    for cola_key, exp_key in MEAN_SENTINEL_PAIRS:
-        ci = key_to_pos.get(cola_key)
-        ei = key_to_pos.get(exp_key)
-        if ci is None or ei is None:
-            continue
-        cv = float(row.iloc[ci]) if pd.notna(row.iloc[ci]) else None
-        ev = float(row.iloc[ei]) if pd.notna(row.iloc[ei]) else None
-        if cv is None and ev is None:
-            continue
-        best = ci if (cv is not None and (ev is None or cv >= ev)) else ei
-        if latex:
-            result[best] = r"\textbf{" + result[best] + "}"
-        else:
-            result[best] = f"**{result[best]}**"
-    return result
+# ── Data loading ──────────────────────────────────────────────────────────────
+
+def _dense_values(exp_df: pd.DataFrame, model: str) -> dict:
+    """Original (dense) score per evaluation task."""
+    out = {}
+    for task in EVAL_TASKS:
+        metric = _metric_for(task)
+        rows = exp_df.loc[
+            (exp_df["model"] == model)
+            & (exp_df["task"] == task)
+            & (exp_df["metric"] == metric)
+        ]
+        out[task] = float(rows["original_value"].iloc[0]) if not rows.empty else float("nan")
+    return out
 
 
-def _bold_higher_mean_md(cells: list[str], row: pd.Series) -> list[str]:
-    return _bold_winners(cells, row, latex=False)
+def _cola_values(
+    cola_df: pd.DataFrame,
+    model: str,
+    compression_type: str,
+    calib_datasets: list,
+) -> dict:
+    """COLA score per eval task, averaged over *calib_datasets*."""
+    out = {}
+    for task in EVAL_TASKS:
+        metric = _metric_for(task)
+        rows = cola_df.loc[
+            (cola_df["model"] == model)
+            & (cola_df["task"] == task)
+            & (cola_df["metric"] == metric)
+            & (cola_df["pruning_type"] == compression_type)
+            & (cola_df["datasets"].isin(calib_datasets))
+        ]
+        out[task] = float(rows["value"].mean()) if not rows.empty else float("nan")
+    return out
 
 
-def _bold_higher_mean_latex(cells: list[str], row: pd.Series) -> list[str]:
-    return _bold_winners(cells, row, latex=True)
-    return result
-
-
-# ── Markdown ─────────────────────────────────────────────────────────────────
-
-def generate_markdown(
-    model_tasks: dict[str, list[str]],
-    model_tables: dict[str, pd.DataFrame],
-    model_col_headers: dict[str, list[str]],
-    model_group_labels: dict[str, list[str]],
-    col_headers: list[str],
-    group_labels: list[str],
-    models: list[str],
+def _exp_values(
+    exp_df: pd.DataFrame,
+    model: str,
     compression_type: str,
     pruning_type: str,
-    nsamples: int,
-) -> str:
-    lines: list[str] = []
-    lines.append(
-        f"## {', '.join(models)} | {compression_type} | nsamples={nsamples} "
-        f"| metric={METRIC_PREFERRED} (fallback: {METRIC_FALLBACK})\n"
-    )
-
-    n_data = len(col_headers)
-
-    # Header row 1: macro-groups
-    groups_row: list[str] = []
-    prev = None
-    for g in group_labels:
-        if g != prev:
-            groups_row.append(g)
-            prev = g
-        else:
-            groups_row.append("")
-    lines.append("| Model | Task | " + " | ".join(groups_row) + " |")
-
-    # Header row 2: calibration dataset sub-labels
-    sub_headers: list[str] = []
-    for h, g in zip(col_headers, group_labels):
-        if g == "Original":
-            sub_headers.append("")
-        elif h in ("Mean", "GMean"):
-            sub_headers.append(f"**{h}**")
-        else:
-            sub_headers.append(h)
-    lines.append("| | | " + " | ".join(sub_headers) + " |")
-
-    # Separator
-    lines.append("|" + "---|" * (n_data + 2))
-
-    # Data rows: one group per model
-    for mi, model in enumerate(models):
-        tasks = model_tasks[model]
-        table = model_tables[model]
-        n_data_model = len(model_col_headers[model])
-
-        for ri, t in enumerate(tasks):
-            row   = table.loc[t]
-            cells = _apply_top3_md([fmt(v) for v in row], row)
-            cells = _bold_higher_mean_md(cells, row)
-            model_cell = model if ri == 0 else ""
-            lines.append(f"| {model_cell} | {t} | " + " | ".join(cells) + " |")
-
-        # Per-model Mean row (mean over this model's tasks)
-        means      = table.loc[tasks].mean()
-        mean_cells = _apply_top3_md([fmt(v) for v in means], means)
-        mean_cells = _bold_higher_mean_md(mean_cells, means)
-        lines.append("| | **Mean** | " + " | ".join(mean_cells) + " |")
-
-        # Blank separator between models
-        if mi < len(models) - 1:
-            lines.append("|" + " |" * (n_data_model + 2))
-
-    return "\n".join(lines) + "\n"
+    calib_datasets: list,
+) -> dict:
+    """Our-method score per eval task, averaged over *calib_datasets*."""
+    out = {}
+    for task in EVAL_TASKS:
+        metric = _metric_for(task)
+        rows = exp_df.loc[
+            (exp_df["model"] == model)
+            & (exp_df["task"] == task)
+            & (exp_df["metric"] == metric)
+            & (exp_df["compression_type"] == compression_type)
+            & (exp_df["pruning_type"] == pruning_type)
+            & (exp_df["calibration_datasets"].isin(calib_datasets))
+        ]
+        out[task] = float(rows["pruned_value"].mean()) if not rows.empty else float("nan")
+    return out
 
 
-# ── LaTeX ────────────────────────────────────────────────────────────────────
+# ── Aggregate stats ───────────────────────────────────────────────────────────
 
-def _escape_latex(s: str) -> str:
-    return (
-        s.replace("\\", r"\textbackslash{}")
-         .replace("_", r"\_")
-         .replace("&", r"\&")
-         .replace("%", r"\%")
-         .replace("#", r"\#")
-         .replace("$", r"\$")
-         .replace("~", r"\textasciitilde{}")
-         .replace("^", r"\textasciicircum{}")
-    )
+def _arith_mean_list(vals: list) -> float:
+    v = [x for x in vals if not math.isnan(x)]
+    return float(np.mean(v)) if v else float("nan")
 
 
-def _latex_cells(row: pd.Series) -> list[str]:
-    """Format a data row applying top-3 green shading (skipping aggregate columns)."""
-    top3 = top3_indices(row)
-    cells = []
-    for ci, (k, v) in enumerate(zip(row.index, row)):
-        s = fmt(v)
-        if ci in top3 and k not in AGGREGATE_SENTINELS:
-            s = LATEX_GREEN[top3.index(ci)] + " " + s
-        cells.append(s)
-    return cells
+def _geo_mean_pct_list(vals: list, dense_vals: list) -> float:
+    """Geometric mean of (value / dense) ratios × 100."""
+    ratios = []
+    for p, d in zip(vals, dense_vals):
+        if not math.isnan(p) and not math.isnan(d) and d > 0 and p > 0:
+            ratios.append(p / d)
+    if not ratios:
+        return float("nan")
+    return math.exp(np.mean([math.log(r) for r in ratios])) * 100
 
 
-def generate_latex(
-    model_tasks: dict[str, list[str]],
-    model_tables: dict[str, pd.DataFrame],
-    model_col_headers: dict[str, list[str]],
-    model_group_labels: dict[str, list[str]],
-    col_headers: list[str],
-    group_labels: list[str],
-    models: list[str],
+# ── Top-3 logic ──────────────────────────────────────────────────────────────
+
+def _top3_indices(values: list) -> list:
+    """Return indices of the top-3 values (descending).  NaN is ignored."""
+    indexed = [(i, v) for i, v in enumerate(values) if not math.isnan(v)]
+    indexed.sort(key=lambda x: x[1], reverse=True)
+    return [i for i, _ in indexed[:3]]
+
+
+# ── LaTeX generation ──────────────────────────────────────────────────────────
+
+def _build_latex(
+    models: list,
     compression_type: str,
     pruning_type: str,
-    nsamples: int,
+    cola_df: pd.DataFrame,
+    exp_df: pd.DataFrame,
 ) -> str:
-    n_data = len(col_headers)
-    total_cols = n_data + 2  # Model | Task | data...
+    """
+    Build the swapped table:
+      Rows  = eval tasks  (+Mean, +Geo%)   per model
+      Cols  = Dense | COLA (i)–(v) Mean Geo% | Ours (i)–(v) Mean Geo%
+    """
+    group_keys = list(CALIB_GROUPS.keys())  # (i)–(v)
+    n_g       = N_GROUPS                    # 5
 
-    # Column spec: Model col | Task col | data cols (vertical rule before Mean/GMean cols)
-    col_parts: list[str] = []
-    for h in col_headers:
-        col_parts.append("|c" if h in ("Mean", "GMean") else "c")
-    col_spec = "l|l|" + "".join(col_parts)
+    # Column layout: Model | Task | Dense || COLA×5 | Mean | Geo% || Ours×5 | Mean | Geo%
+    #   = 2 label cols + 1 dense + 7 COLA + 7 Ours = 17 total
+    n_cola_cols = n_g + 2    # 7
+    n_ours_cols = n_g + 2    # 7
+    col_spec = (
+        "l|l||c||"
+        + "c" * n_g + "|c|c||"
+        + "c" * n_g + "|c|c"
+    )
 
-    # Macro-group spans (data columns only)
-    spans: list[tuple[str, int]] = []
-    cur_label, cur_count = group_labels[0], 1
-    for g in group_labels[1:]:
-        if g == cur_label:
-            cur_count += 1
-        else:
-            spans.append((cur_label, cur_count))
-            cur_label, cur_count = g, 1
-    spans.append((cur_label, cur_count))
+    ours_label = _escape(pruning_type)
 
-    lines: list[str] = []
+    lines = []
     lines.append(r"\begin{table}[htbp]")
     lines.append(r"\centering")
     lines.append(r"\resizebox{\textwidth}{!}{%")
     lines.append(r"\begin{tabular}{" + col_spec + "}")
     lines.append(r"\toprule")
 
-    # Header row 1: macro-groups
-    macro_parts: list[str] = []
-    for label, span in spans:
-        escaped = _escape_latex(label)
-        macro_parts.append(
-            r"\multicolumn{" + str(span) + r"}{c}{" + escaped + "}"
-            if span > 1
-            else r"\multicolumn{1}{c}{" + escaped + "}"
-        )
-    lines.append(r"Model & Task & " + " & ".join(macro_parts) + r" \\")
+    # ── Header row 1: macro groups ───────────────────────────────────────────
+    cola_start = 4                            # Dense is col 3
+    cola_end   = cola_start + n_cola_cols - 1
+    ours_start = cola_end + 1
+    ours_end   = ours_start + n_ours_cols - 1
+    lines.append(
+        r" &  & "
+        + r" & \multicolumn{" + str(n_cola_cols) + r"}{c||}{\textbf{COLA}}"
+        + r" & \multicolumn{" + str(n_ours_cols) + r"}{c}{\textbf{" + ours_label + r"}} \\"
+    )
+    lines.append(
+        r"\cmidrule(lr){" + str(cola_start) + "-" + str(cola_end) + "} "
+        r"\cmidrule(lr){" + str(ours_start) + "-" + str(ours_end) + "}"
+    )
 
-    # cmidrules under each multi-column group
-    cmidrules: list[str] = []
-    col_idx = 3  # data starts at col 3 (after Model, Task)
-    for label, span in spans:
-        if span > 1:
-            cmidrules.append(
-                r"\cmidrule(lr){" + str(col_idx) + "-" + str(col_idx + span - 1) + "}"
-            )
-        col_idx += span
-    if cmidrules:
-        lines.append(" ".join(cmidrules))
-
-    # Header row 2: calibration dataset sub-labels
-    sub_parts: list[str] = []
-    for h, g in zip(col_headers, group_labels):
-        if g == "Original":
-            sub_parts.append("")
-        elif h in ("Mean", "GMean"):
-            sub_parts.append(r"\textbf{" + h + "}")
-        else:
-            sub_parts.append(_escape_latex(h))
-    lines.append(" & & " + " & ".join(sub_parts) + r" \\")
+    # ── Header row 2: sub-columns ────────────────────────────────────────────
+    grp_hdrs = " & ".join(g for g in group_keys)
+    lines.append(
+        r"\textbf{Model} & \textbf{Task} & \textbf{Dense}"
+        + r" & " + grp_hdrs + r" & \textbf{Mean} & \textbf{Geo\%}"
+        + r" & " + grp_hdrs + r" & \textbf{Mean} & \textbf{Geo\%} \\"
+    )
     lines.append(r"\midrule")
 
-    # Data rows: one macro-group per model
+    # ── Data rows per model ──────────────────────────────────────────────────
     for mi, model in enumerate(models):
-        tasks  = model_tasks[model]
-        table  = model_tables[model]
-        mch    = model_col_headers[model]
-        mgl    = model_group_labels[model]
-        n_data_model = len(mch)
-        total_cols_model = n_data_model + 2
-        # multirow spans tasks + 1 Mean row
-        multirow_span = len(tasks) + 1
-        # Use the last part of the model path for a compact display name
-        model_display = r"\textbf{" + _escape_latex(model.split("/")[-1]) + "}"
-        model_cell = r"\multirow{" + str(multirow_span) + r"}{*}{" + model_display + "}"
+        model_short = model.split("/")[-1]
+        dense = _dense_values(exp_df, model)
 
-        for ri, t in enumerate(tasks):
-            row   = table.loc[t]
-            cells = _latex_cells(row)
-            cells = _bold_higher_mean_latex(cells, row)
-            mc    = model_cell if ri == 0 else ""
-            lines.append(mc + " & " + _escape_latex(t) + " & " + " & ".join(cells) + r" \\")
+        # Pre-compute all group-level values for this model
+        # cola_grid[group_key][task]  and  ours_grid[group_key][task]
+        cola_grid = {}
+        ours_grid = {}
+        for gk, calib_ds in CALIB_GROUPS.items():
+            cola_grid[gk] = _cola_values(cola_df, model, compression_type, calib_ds)
+            ours_grid[gk] = _exp_values(exp_df, model, compression_type, pruning_type, calib_ds)
 
-        # Per-model Mean row
-        lines.append(r"\cmidrule{2-" + str(total_cols_model) + "}")
-        means      = table.loc[tasks].mean()
-        mean_cells = _latex_cells(means)
-        mean_cells = _bold_higher_mean_latex(mean_cells, means)
-        lines.append(r" & \textbf{Mean} & " + " & ".join(mean_cells) + r" \\")
+        n_task_rows = len(EVAL_TASKS)
+        n_all_rows  = n_task_rows + 2  # +Mean +Geo%
+        model_cell  = (
+            r"\multirow{"
+            + str(n_all_rows)
+            + r"}{*}{\rotatebox[origin=c]{90}{\textbf{"
+            + _escape(model_short)
+            + r"}}}"
+        )
+
+        # ─ Per-task rows ─────────────────────────────────────────────────────
+        # Collect column-wise lists for bottom summary
+        # col_vals_cola[gk] = [val_task0, val_task1, ...] etc.
+        col_vals_cola = {gk: [] for gk in group_keys}
+        col_vals_ours = {gk: [] for gk in group_keys}
+        dense_list    = []
+
+        for ti, task in enumerate(EVAL_TASKS):
+            d_val = dense[task]
+            dense_list.append(d_val)
+
+            # collect the 5 COLA + 5 Ours values for this task
+            c_vals = [cola_grid[gk][task] for gk in group_keys]
+            o_vals = [ours_grid[gk][task] for gk in group_keys]
+
+            for gk, cv in zip(group_keys, c_vals):
+                col_vals_cola[gk].append(cv)
+            for gk, ov in zip(group_keys, o_vals):
+                col_vals_ours[gk].append(ov)
+
+            # Mean and Geo% across groups for this task
+            c_mean = _arith_mean_list(c_vals)
+            o_mean = _arith_mean_list(o_vals)
+            c_geo  = _geo_mean_pct_list(c_vals, [d_val] * n_g)
+            o_geo  = _geo_mean_pct_list(o_vals, [d_val] * n_g)
+
+            # ── top-3 among the 10 group values (5 COLA + 5 Ours) ───────────
+            all_group_vals = c_vals + o_vals  # length 10
+            top3 = _top3_indices(all_group_vals)  # indices 0-9
+
+            # Format the 10 values, applying \ulc for top-3
+            all_fmt = [_fmt(v) for v in all_group_vals]
+            for rank, idx in enumerate(top3):
+                if all_fmt[idx] != "--":
+                    all_fmt[idx] = _ulc(all_fmt[idx], rank)
+
+            c_cells = " & ".join(all_fmt[:n_g])
+            o_cells = " & ".join(all_fmt[n_g:])
+
+            # ── format Mean / Geo%: bold the winner ──────────────────────────
+            c_mean_s = _fmt(c_mean)
+            o_mean_s = _fmt(o_mean)
+            c_geo_s  = _fmt(c_geo, pct=True)
+            o_geo_s  = _fmt(o_geo, pct=True)
+
+            if not math.isnan(c_mean) and not math.isnan(o_mean):
+                if o_mean >= c_mean:
+                    o_mean_s = r"\textbf{" + o_mean_s + "}"
+                else:
+                    c_mean_s = r"\textbf{" + c_mean_s + "}"
+            if not math.isnan(c_geo) and not math.isnan(o_geo):
+                if o_geo >= c_geo:
+                    o_geo_s = r"\textbf{" + o_geo_s + "}"
+                else:
+                    c_geo_s = r"\textbf{" + c_geo_s + "}"
+
+            label = model_cell if ti == 0 else ""
+            task_name = TASK_DISPLAY.get(task, task)
+
+            lines.append(
+                label
+                + " & " + task_name
+                + " & " + _fmt(d_val)
+                + " & " + c_cells + " & " + c_mean_s + " & " + c_geo_s
+                + " & " + o_cells + " & " + o_mean_s + " & " + o_geo_s
+                + r" \\"
+            )
+
+        # ─ Summary: Mean row ─────────────────────────────────────────────────
+        lines.append(r"\cmidrule{2-" + str(ours_end) + "}")
+        dense_mean = _arith_mean_list(dense_list)
+
+        c_group_means = [_arith_mean_list(col_vals_cola[gk]) for gk in group_keys]
+        o_group_means = [_arith_mean_list(col_vals_ours[gk]) for gk in group_keys]
+
+        # top-3 among the 10 group means
+        all_means = c_group_means + o_group_means
+        top3_m = _top3_indices(all_means)
+        all_means_fmt = [_fmt(v) for v in all_means]
+        for rank, idx in enumerate(top3_m):
+            if all_means_fmt[idx] != "--":
+                all_means_fmt[idx] = _ulc(all_means_fmt[idx], rank)
+
+        c_mean_all = _arith_mean_list(c_group_means)
+        o_mean_all = _arith_mean_list(o_group_means)
+        c_mean_all_s = _fmt(c_mean_all)
+        o_mean_all_s = _fmt(o_mean_all)
+        if not math.isnan(c_mean_all) and not math.isnan(o_mean_all):
+            if o_mean_all >= c_mean_all:
+                o_mean_all_s = r"\textbf{" + o_mean_all_s + "}"
+            else:
+                c_mean_all_s = r"\textbf{" + c_mean_all_s + "}"
+
+        c_geo_all = _geo_mean_pct_list(
+            c_group_means, [dense_mean] * n_g
+        )
+        o_geo_all = _geo_mean_pct_list(
+            o_group_means, [dense_mean] * n_g
+        )
+        c_geo_all_s = _fmt(c_geo_all, pct=True)
+        o_geo_all_s = _fmt(o_geo_all, pct=True)
+        if not math.isnan(c_geo_all) and not math.isnan(o_geo_all):
+            if o_geo_all >= c_geo_all:
+                o_geo_all_s = r"\textbf{" + o_geo_all_s + "}"
+            else:
+                c_geo_all_s = r"\textbf{" + c_geo_all_s + "}"
+
+        lines.append(
+            r" & \textbf{Mean}"
+            + " & " + _fmt(dense_mean)
+            + " & " + " & ".join(all_means_fmt[:n_g])
+            + " & " + c_mean_all_s + " & " + c_geo_all_s
+            + " & " + " & ".join(all_means_fmt[n_g:])
+            + " & " + o_mean_all_s + " & " + o_geo_all_s
+            + r" \\"
+        )
+
+        # ─ Summary: Geo% row ─────────────────────────────────────────────────
+        c_group_geos = [
+            _geo_mean_pct_list(col_vals_cola[gk], dense_list)
+            for gk in group_keys
+        ]
+        o_group_geos = [
+            _geo_mean_pct_list(col_vals_ours[gk], dense_list)
+            for gk in group_keys
+        ]
+
+        all_geos = c_group_geos + o_group_geos
+        top3_g = _top3_indices(all_geos)
+        all_geos_fmt = [_fmt(v, pct=True) for v in all_geos]
+        for rank, idx in enumerate(top3_g):
+            if all_geos_fmt[idx] != "--":
+                all_geos_fmt[idx] = _ulc(all_geos_fmt[idx], rank)
+
+        c_geo_overall = _arith_mean_list(c_group_geos)
+        o_geo_overall = _arith_mean_list(o_group_geos)
+        c_geo_ov_s = _fmt(c_geo_overall, pct=True)
+        o_geo_ov_s = _fmt(o_geo_overall, pct=True)
+        if not math.isnan(c_geo_overall) and not math.isnan(o_geo_overall):
+            if o_geo_overall >= c_geo_overall:
+                o_geo_ov_s = r"\textbf{" + o_geo_ov_s + "}"
+            else:
+                c_geo_ov_s = r"\textbf{" + c_geo_ov_s + "}"
+
+        lines.append(
+            r" & \textbf{Geo\%}"
+            + " & " + _fmt(100.0, pct=True)
+            + " & " + " & ".join(all_geos_fmt[:n_g])
+            + " & " + c_geo_ov_s + " & "
+            + " & " + " & ".join(all_geos_fmt[n_g:])
+            + " & " + o_geo_ov_s + " &"
+            + r" \\"
+        )
 
         if mi < len(models) - 1:
             lines.append(r"\midrule")
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
-    lines.append("}")  # close resizebox
+    lines.append("}")  # close \resizebox
 
-    model_str = ", ".join(_escape_latex(m) for m in models)
-    caption = (
-        f"{model_str}, {_escape_latex(compression_type)}, "
-        f"nsamples={nsamples}, metric={_escape_latex(METRIC_PREFERRED)}"
-    )
-    lines.append(r"\caption{" + caption + "}")
+    # Caption & label
+    model_str = ", ".join(_escape(m) for m in models)
     lines.append(
-        r"\label{tab:" + compression_type + "_" + pruning_type + "_n" + str(nsamples) + "}"
+        r"\caption{Comparison of COLA vs.\ \texttt{"
+        + _escape(pruning_type)
+        + r"} calibration sampling under "
+        + _escape(compression_type)
+        + r" compression ("
+        + model_str
+        + r").}"
+    )
+    lines.append(
+        r"\label{tab:"
+        + compression_type
+        + "_"
+        + pruning_type
+        + "}"
     )
     lines.append(r"\end{table}")
     return "\n".join(lines) + "\n"
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate Markdown + LaTeX comparison tables for COLA vs. experiment results."
+        description="Generate a LaTeX comparison table: COLA vs. a selected "
+                    "calibration-sampling strategy."
     )
-    parser.add_argument("--compression_type", required=True,
-                        choices=["pruning", "quantization"],
-                        help="Compression type to filter on.")
-    parser.add_argument("--pruning_type", required=True,
-                        help="Pruning type from experiment_results (e.g. random, unique_tokens).")
-    parser.add_argument("--nsamples", required=True, type=int,
-                        help="Number of calibration samples.")
-    parser.add_argument("--model", required=True, nargs="+",
-                        help="One or more model names (e.g. google/gemma-7b meta-llama/Llama-2-7b). "
-                             "Multiple models are shown as separate macro-row groups in one table.")
-    parser.add_argument("--output_dir", default=None,
-                        help="Directory to write output files. Defaults to results/tables/.")
+    parser.add_argument(
+        "--compression_type",
+        required=True,
+        choices=["pruning", "quantization", "awq", "2ssp"],
+        help="Compression method to filter on.",
+        # For 2ssp, data is loaded from 2ssp_cola_experiment_results.csv
+        # and 2ssp_experiment_results.csv instead of the default CSVs.
+    )
+    parser.add_argument(
+        "--pruning_type",
+        required=True,
+        help="Calibration-sampling strategy from experiment_results_new.csv "
+             "(e.g. words_dataset, unique_tokens, random).",
+    )
+    parser.add_argument(
+        "--model",
+        required=True,
+        nargs="+",
+        help="One or more HuggingFace model identifiers.",
+    )
+    parser.add_argument(
+        "--output_dir",
+        default=None,
+        help="Directory for output .tex file (default: results/tables/).",
+    )
     args = parser.parse_args()
 
-    models = args.model
+    # ── load data ─────────────────────────────────────────────────────────────
+    if args.compression_type == "2ssp":
+        cola_df = pd.read_csv(COLA_2SSP_CSV)
+        exp_df  = pd.read_csv(EXP_2SSP_CSV)
+    else:
+        cola_df = pd.read_csv(COLA_CSV)
+        exp_df  = pd.read_csv(EXP_CSV)
 
-    model_tasks, model_tables, model_col_headers, model_group_labels, col_headers, group_labels = build_multi_table(
-        args.compression_type, args.pruning_type, args.nsamples, models,
-    )
+    for m in args.model:
+        if m not in exp_df["model"].unique():
+            print(f"[WARN] Model '{m}' not found in {EXP_CSV.name}", file=sys.stderr)
+        if m not in cola_df["model"].unique():
+            print(f"[WARN] Model '{m}' not found in {COLA_CSV.name}", file=sys.stderr)
 
-    md = generate_markdown(
-        model_tasks, model_tables, model_col_headers, model_group_labels,
-        col_headers, group_labels,
-        models, args.compression_type, args.pruning_type, args.nsamples,
-    )
-    tex = generate_latex(
-        model_tasks, model_tables, model_col_headers, model_group_labels,
-        col_headers, group_labels,
-        models, args.compression_type, args.pruning_type, args.nsamples,
-    )
+    # ── generate ──────────────────────────────────────────────────────────────
+    tex = _build_latex(args.model, args.compression_type, args.pruning_type, cola_df, exp_df)
 
-    # Determine output dir
+    # ── write ─────────────────────────────────────────────────────────────────
     out_dir = Path(args.output_dir) if args.output_dir else SCRIPT_DIR / "results" / "tables"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    safe_models = "_".join(m.replace("/", "_") for m in models)
-    stem = f"{safe_models}_{args.compression_type}_{args.pruning_type}_n{args.nsamples}"
-
-    md_path  = out_dir / f"{stem}.md"
+    safe = "_".join(m.replace("/", "_") for m in args.model)
+    stem = f"{safe}_{args.compression_type}_{args.pruning_type}"
     tex_path = out_dir / f"{stem}.tex"
-
-    md_path.write_text(md, encoding="utf-8")
     tex_path.write_text(tex, encoding="utf-8")
+    print(f"LaTeX -> {tex_path}")
 
-    print(f"Markdown → {md_path}")
-    print(f"LaTeX    → {tex_path}")
-
-    # Also print to stdout for quick preview
     print("\n" + "=" * 80)
-    print("MARKDOWN PREVIEW")
-    print("=" * 80)
-    print(md)
-    print("=" * 80)
-    print("LATEX PREVIEW")
-    print("=" * 80)
     print(tex)
 
 

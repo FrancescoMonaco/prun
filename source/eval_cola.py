@@ -9,11 +9,16 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import Dataset
 from llmcompressor.modifiers.pruning import WandaPruningModifier
 from llmcompressor.modifiers.quantization import GPTQModifier
+from llmcompressor.modifiers.awq import AWQModifier
 from llmcompressor import oneshot
 
 # Add COLA to sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "COLA"))
 from cola.sample_selection import select_samples
+
+# Add 2SSP to sys.path
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "2SSP"))
+from src.pruning import two_stage_2ssp
 
 from data import get_dataset, get_text_from_item
 from similarity_check import prepare_calibration
@@ -59,6 +64,31 @@ def process_results(results_dict):
     return processed
 
 
+def get_completed_experiments(output_csv):
+    """Returns a set of (model, pruning_type, sampling, nsamples, sparsity, datasets)
+    for which at least one result row already exists in the CSV."""
+    if not os.path.exists(output_csv):
+        return set()
+    try:
+        df = pd.read_csv(output_csv)
+        required_cols = {"model", "pruning_type", "sampling", "nsamples", "sparsity", "datasets"}
+        if not required_cols.issubset(df.columns):
+            return set()
+        return set(
+            zip(
+                df["model"],
+                df["pruning_type"],
+                df["sampling"],
+                df["nsamples"],
+                df["sparsity"],
+                df["datasets"],
+            )
+        )
+    except Exception as e:
+        log.error(f"Error reading completed experiments: {e}")
+        return set()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run Pruning Experiment with COLA and other methods"
@@ -80,6 +110,9 @@ def main():
             "arc_challenge",
             "arc_easy",
             "openbookqa",
+            "anli_r1",
+            "gsm8k",
+            "mmlu",
         ],
         help="Tasks for evaluation (lm_eval names)",
     )
@@ -87,7 +120,7 @@ def main():
         "--compression_type",
         type=str,
         default="pruning",
-        choices=["pruning", "quantization"],
+        choices=["pruning", "quantization", "awq", "2ssp"],
         help="Type of compression to perform",
     )
     parser.add_argument(
@@ -134,6 +167,19 @@ def main():
 
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # 0. Early exit if all requested experiments already exist in the CSV
+    datasets_key = ",".join(args.datasets)
+    completed = get_completed_experiments(args.output_csv)
+    remaining_types = [
+        t for t in args.pruning_types
+        if (args.model, args.compression_type, t, args.nsamples, args.sparsity, datasets_key) not in completed
+    ]
+    if not remaining_types:
+        log.info("All requested experiments are already in the CSV. Nothing to do.")
+        return
+    log.info(f"Experiments to run: {remaining_types} (skipping {len(args.pruning_types) - len(remaining_types)} already completed)")
+    args.pruning_types = remaining_types
 
     # 1. Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
@@ -186,6 +232,7 @@ def main():
     results_list = []
 
     for p_type in args.pruning_types:
+
         log.info(f"\n--- Starting Pruning Type: {p_type} ---")
 
         # Load model for pruning
@@ -195,6 +242,7 @@ def main():
             torch_dtype=torch.float16,
             device_map="auto",
             trust_remote_code=True,
+            attn_implementation="flash_attention_2",
         )
 
         # 3. Prepare calibration data for this pruning type
@@ -211,7 +259,7 @@ def main():
                 tokenizer,
                 num_clusters=args.nsamples,
                 device=device,
-                batch_size=4,
+                batch_size=16,
             )
 
             if not selected_cola_samples:
@@ -254,19 +302,41 @@ def main():
         # 4. Prune or Quantize the model
         log.info(f"Compressing model with {args.compression_type} using {p_type} calibration data...")
 
-        # Convert calibration data to Dataset object for llmcompressor
-        calibration_dataset = Dataset.from_list(calibration_data)
-
-        if args.compression_type == "pruning":
-            log.info(f"Pruning model with sparsity {args.sparsity}...")
-            recipe = WandaPruningModifier(
-                sparsity=args.sparsity, mask_structure="0:0", targets="__ALL__"
-            )
+        if args.compression_type == "2ssp":
+            # Convert calibration data to 2SSP format: list of (1, seq_len) tensors
+            all_ids = torch.cat([item["input_ids"].view(-1) for item in calibration_data])
+            ssp_seq_len = 2048
+            num_chunks = all_ids.size(0) // ssp_seq_len
+            if num_chunks == 0:
+                log.warning(f"Only {all_ids.size(0)} tokens, need >= {ssp_seq_len} for 2SSP. Using all tokens as one sample.")
+                calibration_2ssp = [all_ids.unsqueeze(0)]
+            else:
+                calibration_2ssp = [all_ids[i * ssp_seq_len : (i + 1) * ssp_seq_len].unsqueeze(0) for i in range(num_chunks)]
+            log.info(f"2SSP calibration: {len(calibration_2ssp)} samples of length {calibration_2ssp[0].size(1)}")
+            model.config.use_cache = False
+            result = two_stage_2ssp(model, calibration_2ssp, args.sparsity)
+            if result is False:
+                log.error("2SSP pruning failed – invalid sparsity parameters")
+                del model
+                torch.cuda.empty_cache()
+                continue
+            model = result
         else:
-            log.info("Quantizing model with GPTQ...")
-            recipe = GPTQModifier(targets="Linear", scheme="W4A16")
+            # Convert calibration data to Dataset object for llmcompressor
+            calibration_dataset = Dataset.from_list(calibration_data)
 
-        oneshot(model=model, dataset=calibration_dataset, recipe=recipe)
+            if args.compression_type == "pruning":
+                log.info(f"Pruning model with sparsity {args.sparsity}...")
+                recipe = WandaPruningModifier(
+                    sparsity=args.sparsity, mask_structure="0:0", targets="__ALL__"
+                )
+            elif args.compression_type == "quantization":
+                log.info("Quantizing model with GPTQ...")
+                recipe = GPTQModifier(targets="Linear", scheme="W4A16", ignore=["lm_head"])
+            elif args.compression_type == "awq":
+                log.info("Quantizing model with AWQ...")
+                recipe = GPTQModifier(targets="Linear", scheme="W4A16", ignore=["lm_head"])
+            oneshot(model=model, dataset=calibration_dataset, recipe=recipe)
 
         # 5. Evaluate pruned model
         log.info(f"Evaluating pruned model ({p_type})...")
@@ -279,8 +349,8 @@ def main():
             m.update(
                 {
                     "model": args.model,
-                    "compression_type": args.compression_type,
-                    "pruning_type": p_type,
+                    "pruning_type": args.compression_type,
+                    "sampling": p_type,
                     "nsamples": args.nsamples,
                     "sparsity": args.sparsity,
                     "datasets": ",".join(args.datasets),

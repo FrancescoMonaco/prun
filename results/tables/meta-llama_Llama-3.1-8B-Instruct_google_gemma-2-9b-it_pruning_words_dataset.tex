@@ -1,0 +1,42 @@
+\begin{table}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l|l||c||ccccc|c|c||ccccc|c|c}
+\toprule
+ &  &  & \multicolumn{7}{c||}{\textbf{COLA}} & \multicolumn{7}{c}{\textbf{words\_dataset}} \\
+\cmidrule(lr){4-10} \cmidrule(lr){11-17}
+\textbf{Model} & \textbf{Task} & \textbf{Dense} & (i) & (ii) & (iii) & (iv) & (v) & \textbf{Mean} & \textbf{Geo\%} & (i) & (ii) & (iii) & (iv) & (v) & \textbf{Mean} & \textbf{Geo\%} \\
+\midrule
+\multirow{12}{*}{\rotatebox[origin=c]{90}{\textbf{Llama-3.1-8B-Instruct}}} & ARC-C & 0.5171 & \ulc{0.5154}{foresta!70} & 0.5030 & 0.5028 & 0.5124 & 0.5077 & 0.5082 & 98.3 & \ulc{0.5145}{foresta!40} & 0.5098 & \ulc{0.5158}{foresta} & 0.5132 & 0.5111 & \textbf{0.5129} & \textbf{99.2} \\
+ & ARC-E & 0.7386 & 0.7327 & 0.7346 & 0.7313 & 0.7321 & 0.7374 & 0.7336 & 99.3 & \ulc{0.7386}{foresta!40} & \ulc{0.7405}{foresta} & 0.7374 & 0.7384 & \ulc{0.7393}{foresta!70} & \textbf{0.7388} & \textbf{100.0} \\
+ & BoolQ & 0.8446 & \ulc{0.8499}{foresta} & 0.8474 & 0.8441 & \ulc{0.8485}{foresta!40} & \ulc{0.8491}{foresta!70} & \textbf{0.8478} & \textbf{100.4} & 0.8450 & 0.8445 & 0.8483 & 0.8460 & 0.8448 & 0.8457 & 100.1 \\
+ & HellaSwag & 0.7171 & \ulc{0.7203}{foresta!70} & \ulc{0.7209}{foresta} & 0.7176 & 0.7167 & 0.7186 & \textbf{0.7188} & \textbf{100.2} & 0.7178 & \ulc{0.7190}{foresta!40} & 0.7183 & 0.7159 & 0.7180 & 0.7178 & 100.1 \\
+ & WinoGr. & 0.6946 & \ulc{0.6893}{foresta} & \ulc{0.6851}{foresta!40} & 0.6793 & 0.6803 & 0.6807 & \textbf{0.6830} & \textbf{98.3} & 0.6788 & 0.6843 & \ulc{0.6882}{foresta!70} & 0.6815 & 0.6803 & 0.6826 & 98.3 \\
+ & GSM8k & 0.7809 & \ulc{0.7655}{foresta!40} & 0.7570 & 0.7440 & 0.7654 & 0.7589 & 0.7582 & 97.1 & \ulc{0.7688}{foresta} & 0.7627 & 0.7582 & 0.7570 & \ulc{0.7661}{foresta!70} & \textbf{0.7625} & \textbf{97.6} \\
+ & MMLU & 0.6228 & 0.6208 & 0.6251 & 0.6204 & 0.6194 & 0.6156 & 0.6202 & 99.6 & 0.6223 & \ulc{0.6268}{foresta!70} & \ulc{0.6270}{foresta} & 0.6244 & \ulc{0.6258}{foresta!40} & \textbf{0.6253} & \textbf{100.4} \\
+ & OBQA & 0.4780 & 0.4667 & 0.4730 & 0.4667 & 0.4620 & 0.4710 & 0.4679 & 97.9 & \ulc{0.4790}{foresta!70} & 0.4750 & \ulc{0.4810}{foresta} & 0.4730 & \ulc{0.4780}{foresta!40} & \textbf{0.4772} & \textbf{99.8} \\
+ & RTE & 0.7473 & 0.7232 & 0.7220 & 0.7196 & 0.7238 & 0.7238 & 0.7225 & 96.7 & 0.7220 & 0.7238 & \ulc{0.7274}{foresta!70} & \ulc{0.7274}{foresta!40} & \ulc{0.7310}{foresta} & \textbf{0.7264} & \textbf{97.2} \\
+ & ANLI & 0.5840 & 0.5637 & 0.5900 & 0.5933 & 0.5710 & 0.5780 & 0.5792 & 99.2 & \ulc{0.6150}{foresta!70} & 0.5850 & \ulc{0.5980}{foresta!40} & 0.5965 & \ulc{0.6195}{foresta} & \textbf{0.6028} & \textbf{103.2} \\
+\cmidrule{2-17}
+ & \textbf{Mean} & 0.6725 & 0.6647 & 0.6658 & 0.6619 & 0.6632 & 0.6641 & 0.6639 & 98.7 & \ulc{0.6702}{foresta!70} & 0.6672 & \ulc{0.6700}{foresta!40} & 0.6673 & \ulc{0.6714}{foresta} & \textbf{0.6692} & \textbf{99.5} \\
+ & \textbf{Geo\%} & 100.0 & 98.8 & 99.0 & 98.4 & 98.5 & 98.7 & 98.7 &  & \ulc{99.8}{foresta!70} & 99.2 & \ulc{99.7}{foresta!40} & 99.3 & \ulc{99.9}{foresta} & \textbf{99.6} & \\
+\midrule
+\multirow{12}{*}{\rotatebox[origin=c]{90}{\textbf{gemma-2-9b-it}}} & ARC-C & 0.5179 & \ulc{0.5213}{foresta} & 0.5137 & 0.5171 & 0.5162 & \ulc{0.5183}{foresta!70} & \textbf{0.5173} & \textbf{99.9} & 0.5148 & 0.5154 & 0.5154 & \ulc{0.5179}{foresta!40} & 0.5132 & 0.5153 & 99.5 \\
+ & ARC-E & 0.6679 & \ulc{0.6751}{foresta} & 0.6709 & 0.6694 & \ulc{0.6728}{foresta!70} & \ulc{0.6723}{foresta!40} & \textbf{0.6721} & \textbf{100.6} & 0.6672 & 0.6675 & 0.6690 & 0.6696 & 0.6690 & 0.6685 & 100.1 \\
+ & BoolQ & 0.8859 & \ulc{0.8892}{foresta!70} & 0.8862 & 0.8865 & \ulc{0.8881}{foresta!40} & 0.8864 & 0.8873 & 100.2 & 0.8880 & 0.8879 & 0.8879 & 0.8872 & \ulc{0.8898}{foresta} & \textbf{0.8881} & \textbf{100.2} \\
+ & HellaSwag & 0.6724 & 0.6711 & 0.6723 & 0.6708 & 0.6706 & 0.6722 & 0.6714 & 99.9 & \ulc{0.6727}{foresta!40} & 0.6715 & 0.6723 & \ulc{0.6734}{foresta} & \ulc{0.6734}{foresta!70} & \textbf{0.6727} & \textbf{100.0} \\
+ & WinoGr. & 0.7048 & 0.6924 & 0.6906 & 0.6882 & \ulc{0.6926}{foresta!40} & \ulc{0.6965}{foresta} & \textbf{0.6921} & \textbf{98.2} & 0.6911 & 0.6863 & 0.6918 & \ulc{0.6934}{foresta!70} & 0.6882 & 0.6902 & 97.9 \\
+ & GSM8k & 0.7544 & 0.7405 & 0.7434 & \ulc{0.7498}{foresta!70} & 0.7430 & 0.7388 & 0.7431 & 98.5 & 0.7432 & \ulc{0.7441}{foresta!40} & \ulc{0.7509}{foresta} & 0.7426 & 0.7437 & \textbf{0.7449} & \textbf{98.7} \\
+ & MMLU & 0.3383 & 0.3590 & 0.3353 & 0.3294 & \ulc{0.3680}{foresta!70} & 0.3394 & 0.3462 & 102.3 & \ulc{0.3695}{foresta} & 0.3607 & \ulc{0.3642}{foresta!40} & 0.3588 & 0.3563 & \textbf{0.3619} & \textbf{107.0} \\
+ & OBQA & 0.4540 & 0.4607 & \ulc{0.4610}{foresta!40} & \ulc{0.4640}{foresta} & 0.4570 & \ulc{0.4630}{foresta!70} & \textbf{0.4611} & \textbf{101.6} & 0.4533 & 0.4560 & 0.4540 & 0.4520 & 0.4540 & 0.4539 & 100.0 \\
+ & RTE & 0.7834 & 0.7822 & \ulc{0.7888}{foresta} & 0.7780 & 0.7834 & \ulc{0.7870}{foresta!70} & 0.7839 & 100.1 & 0.7846 & 0.7834 & \ulc{0.7852}{foresta!40} & 0.7852 & 0.7834 & \textbf{0.7844} & \textbf{100.1} \\
+ & ANLI & 0.7280 & 0.7237 & \ulc{0.7330}{foresta} & 0.7305 & 0.7240 & 0.7215 & 0.7265 & 99.8 & \ulc{0.7327}{foresta!70} & \ulc{0.7315}{foresta!40} & 0.7260 & 0.7305 & 0.7300 & \textbf{0.7301} & \textbf{100.3} \\
+\cmidrule{2-17}
+ & \textbf{Mean} & 0.6507 & 0.6515 & 0.6495 & 0.6484 & \ulc{0.6516}{foresta!40} & 0.6496 & 0.6501 & 99.9 & \ulc{0.6517}{foresta} & 0.6504 & \ulc{0.6517}{foresta!70} & 0.6511 & 0.6501 & \textbf{0.6510} & \textbf{100.0} \\
+ & \textbf{Geo\%} & 100.0 & \ulc{100.5}{foresta!40} & 99.8 & 99.6 & \ulc{100.6}{foresta} & 99.9 & 100.1 &  & \ulc{100.6}{foresta!70} & 100.3 & 100.5 & 100.3 & 100.2 & \textbf{100.4} & \\
+\bottomrule
+\end{tabular}
+}
+\caption{Comparison of COLA vs.\ \texttt{words\_dataset} calibration sampling under pruning compression (meta-llama/Llama-3.1-8B-Instruct, google/gemma-2-9b-it).}
+\label{tab:pruning_words_dataset}
+\end{table}

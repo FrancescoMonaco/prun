@@ -144,6 +144,14 @@ if __name__ == "__main__":
     results = []  # list of dicts → DataFrame at the end
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # Ensure output directory exists early so incremental saves work
+    os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
+
+    def save_partial():
+        if results:
+            pd.DataFrame(results).to_csv(args.output, index=False)
+            log.info(f"Partial results saved to {args.output} ({len(results)} rows)")
+
     ##  OUR METHOD (model-free: uses unique_tokens sampling)
     log.info("=" * 60)
     log.info("Timing OUR method (unique_tokens – no LLM required)")
@@ -211,6 +219,7 @@ if __name__ == "__main__":
                 }
             )
             log.info(f"  tok={tok_time:.2f}s  sel={sel_time:.2f}s  total={tok_time+sel_time:.2f}s")
+            save_partial()
 
     ## 2. COLA METHOD (requires the actual LLM for activations)
     log.info("=" * 60)
@@ -284,13 +293,13 @@ if __name__ == "__main__":
                     }
                 )
                 log.info(f"  pre={pre_time:.2f}s  sel={sel_time:.2f}s")
+                save_partial()
 
         # Free GPU memory before loading the next model
         del model
         torch.cuda.empty_cache()
 
-    # 3. Save results
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    # 3. Final save
     df = pd.DataFrame(results)
     df.to_csv(args.output, index=False)
     log.info(f"Results saved to {args.output}")

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MAX_JOBS=2          # number of parallel jobs (GPUs 0-1 for eval.sh)
+MAX_JOBS=4          # number of parallel jobs (= number of GPUs)
 declare -a PIDS=()  # track background PIDs
 declare -a GPU_BUSY=() # track which GPU slot is in use
 
@@ -37,7 +37,7 @@ SPARSITY_PREFIX="--sparsity"
 SPARSITY="0.25"
 NUM_SAMPLES=(128)
 COMPRESSION_PREFIX="--compression_type"
-COMPRESSION_TYPE=("pruning" "quantization" "awq")
+COMPRESSION_TYPE=("awq")
 PRUNING_PREFIX="--pruning_types"
 PRUNING_TYPES=("unique_tokens" "random" "most_similar" "least_perplexity" "distribution_matching" "words_dataset")
 
@@ -70,7 +70,7 @@ for MODEL in "${MODELS[@]}"; do
                     echo "Model=$MODEL, Dataset=$DATASET, Comp=$COMP, NSamples=$NSAMPLES, Pruning=$P_TYPE"
                     echo "================================================================"
 
-                    LOG="logs/eval_t${TASK_ID}_s${SUBTASK_ID}_gpu${GPU_SLOT}.log"
+                    LOG="logs/eval_awq${TASK_ID}_s${SUBTASK_ID}_gpu${GPU_SLOT}.log"
                     launch_job "$GPU_SLOT" \
                         $DATASET_PREF $DATASET \
                         $MODEL_PREF "$MODEL" \
